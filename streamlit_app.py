@@ -7,8 +7,11 @@ from static_variables import confirmation_dict, confirmation_replies, abbreviati
 st.title("Test Chat")
 
 # Initialize chat history
+welcome_msg = """
+Hey, nice to meet you!  \nI'm here for helping you find interesting courses for your next semester. Just name a course you liked in the past or describe what kind of course you're looking for. For more instructions, click on the button below."""
+
 if "messages" not in st.session_state:
-    st.session_state.messages = []
+    st.session_state.messages = [{"role": "assistant", "content": welcome_msg}]
 
 # Initialize the current state
 if "current_state" not in st.session_state:
@@ -28,7 +31,7 @@ if 'hint_button' not in st.session_state:
     st.session_state.hint_button = {
         'show_instructions': False,
         'show_hint': False,
-        'current_hint': 'none'
+        'current_hint': 'all'
     }
 
 # Function to toggle the instruction/hint buttons
@@ -252,6 +255,39 @@ if st.session_state.hint_button['current_hint'] == 'none':
                 {hints['instructions']}
             </div>
         """, unsafe_allow_html=True)
+
+elif st.session_state.hint_button['current_hint'] == 'all':
+    # Layout for buttons side by side
+    col1, col2, col3 = st.columns([1, 1, 2])
+
+    with col1:
+        if st.button("Instructions", key="button_1"):
+            toggle_hint("show_instructions")
+
+    with col2:
+        if st.button("Feedback Hint", key="button_2"):
+            toggle_hint("show_hint")
+            
+    #with col3:
+    #    if st.button(st.session_state.hint_button['current_hint'], key="button_2"):
+    #        toggle_hint("show_hint")
+
+    # Display the corresponding expanded text
+    if st.session_state.hint_button['show_instructions']:
+        st.markdown(f"""
+            <div class="hint-box">
+                {hints['instructions']}
+            </div>
+        """, unsafe_allow_html=True)
+
+    if st.session_state.hint_button['show_hint']:
+        st.markdown(f"""
+            <div class="hint-box">
+                {hints['Feedback Hint']}
+            </div>
+        """, unsafe_allow_html=True)
+
+
 else:
 
     # Layout for buttons side by side

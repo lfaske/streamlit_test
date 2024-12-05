@@ -154,6 +154,13 @@ hints = {
         """<div style="padding-left: 10px; max-width: 80%; font-size: 10px;">
         <p>Getting started!</p>
         </div>""",
-    'Feedback Hint': "How to give feedback! Lets see "
+    'Feedback Hint': 
+        """<div style="padding-left: 10px; max-width: 80%; font-size: 10px;">
+            <ul>
+                <li>When giving feedback, please refer to the course you want to give feedback to by it's position in the list (e.g., <i>'the first'</i> or <i>'course 4'</i>).</li>
+                <li>Please write each course separately instead of giving ranges like <i>'courses 2 to 4'</i>. You can, however, tell me if you liked <i>all</i> or <i>none</i> of the recommendations (e.g., <i>'I like all of them'</i>).</li>
+                <li>Also, if you want to give both positive and negative feedback for some recommended courses in a single message, please make sure that you don't write them in the same sentence or that you divide the sentence using <i>'but'</i>. For example, you could write: <i>'I liked the first and third recommendation, but I didn't like the second one.'</i></li>
+            </ul>
+            </div>"""
 
 }

@@ -41,6 +41,7 @@ intent_replies = {
 intent_examples = {
     "greeting": ["hello", "hi chatbot", "good morning", "how are you"],
     "free_description": [
+        "I'm looking for a course for computational linguistics",
         "I want to find a course about machine learning",
         "Can you recommend me an online course?",
         "I am looking for a beginner course in psychology",
@@ -50,7 +51,37 @@ intent_examples = {
         "I want to learn about natural language processing",
         "I want to know more about natural language processing",
         "I like artificial intelligence",
-        "I like computer science"
+        "I like computer science",
+        "I need 4 ECTS for my Computational Linguistics module",
+        "Is there a course with 2 ECTS for the elective Artificial Intelligence module?",
+        "I want a Computational Linguistics lecture",
+        "I'm looking for a hybrid Computational Linguistics seminar",
+        "Are there any courses for the Mathematics module with 4 sws?",
+        "I need 2 more ECTS for the Informatics module",
+        "I want a hybrid lecture with 2 SWS and 4 ects for the elective computational linguistics module.",
+        "I want a course with 4 ECTS.",
+        "I want a course with 2 SWS.",
+        "I want a course with 6 ECTS.",
+        "I want something with 4 SWS.",
+        "I need 4 ECTS.",
+        "I prefer online lectures",
+        "I'm looking for a course for my Computational Linguistics module",
+        "I want to learn more about Artificial Intelligence",
+        "I want to learn more about Machine Learning",
+        "I want to learn more about Computational Linguistics",
+        "I want to learn more about Philosophy",
+        "I want to learn programming",
+        "I like python",
+        "I like Machine Learning",
+        "I like Neurobiology",
+        "I like Computational Linguistics",
+        "I like Philosophy",
+        "I like math",
+        "It should take place on Thursday",
+        "It should be on Monday or Wednesday",
+        "I like Prof. Dr. Gordon Pipa",
+        "I like Pipa",
+        "I want a course on Tuesday"
     ],
     "liked_course_reference": [
         "I liked the cognitive neuroscience course",
@@ -148,6 +179,13 @@ hints = {
                 <li>Keep it simple! It's better to write multiple simple messages than to put all the information into a single one.</li>
                 <li>Please don't put different input (such as a reference to a course you liked in the past, a free description of what you would like, or feedback on a recommended course) into a single message. Instead, split it up into multiple messages so that I can better understand you.</li>
                 <li>If you want to tell me more than one course you liked in the past, please do so in separate messages (1 course per message).</li>
+                <li>Sometimes, I have a hard time understanding the intention of a message. If I don't understand you correctly, you can just start your message by typing out your intention. 
+                    <ul>
+                        <li>To give feedback, start with 'Feedback:'</li>
+                        <li>To tell me a course you liked in the past, start with 'Ref:'</li>
+                        <li>To give a free description, start with 'Free:'.</li>
+                    </ul>
+                </li>
             </ul>
         </div>""",
     'How to start': 
@@ -162,5 +200,50 @@ hints = {
                 <li>Also, if you want to give both positive and negative feedback for some recommended courses in a single message, please make sure that you don't write them in the same sentence or that you divide the sentence using <i>'but'</i>. For example, you could write: <i>'I liked the first and third recommendation, but I didn't like the second one.'</i></li>
             </ul>
             </div>"""
+}
 
+# To find mentioned modules
+module_dict = {
+    'study_program': {
+        'bachelor': 'B',
+        'master': 'M'
+    },
+    'module': {
+        'elective': 'WP',
+        'compulsory': 'P'
+        # 'BW' is only used for 'Instruction for Working Scientifically' ('Anleitung zum wissenschaftlichen Arbeiten') -> not important here
+    },
+    'area': {
+        'ai': '-AI',
+        'artificial intelligence': '-AI',
+        'ni': '-NI',
+        'neuroinformatics': '-NI', 
+        'neuroinfo': '-NI',
+        'cl': '-CL', 
+        'linguistics': '-CL',
+        'cnp': '-CNP', 
+        'neuropsychology': '-CNP', 
+        'psychology': '-CNP',
+        'mat': '-MAT',
+        'mathematics': '-MAT', 
+        'math': '-MAT',
+        'phil': '-PHIL', 
+        'philosophy': '-PHIL', 
+        'philo': '-PHIL',
+        'working scientifically': '-IWS', 
+        'iws': '-IWS',
+        'methods': '-MCS',
+        'mcs': '-MCS',
+        'ic': '-IC', 
+        'interdisciplinary': '-IC',
+        'inf': '-INF', 
+        'info': '-INF', 
+        'informatics': '-INF',
+        'computer science': '-INF',
+        'study project': '-SP', 
+        'sp': '-SP',
+        'ns': '-NS', 
+        'neuroscience': '-NS',
+        'distinguishing elective': ''
+    }
 }

@@ -3,7 +3,8 @@ import numpy as np
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 import re
-from static_variables import intent_replies, instructions
+from static_variables import intent_replies, module_dict
+import string
 
 ## Handles data, recommendation generation, feedback interpretation, and user profiles
 model = SentenceTransformer('paraphrase-distilroberta-base-v1')
@@ -42,13 +43,16 @@ with open("courses.json", "r") as file:
     courses = json.load(file)
     current_courses = courses["current"]
     past_courses = courses["past"]
+    current_attributes = courses["current_attr"]
+    past_attributes = courses["past_attr"]
 loaded_embeddings = np.load('embeddings.npz', allow_pickle=True)
 current_embeddings = loaded_embeddings['current_courses']
 past_embeddings = loaded_embeddings['prev_courses']
 title_embeddings = dict(loaded_embeddings['titles'].item())
 intent_embeddings = dict(loaded_embeddings['intent'].item())
 
-def get_data():
+
+def get_data():### PROB USELESS
     # Create a dictionary containing all data
     data = {
         'current_courses': current_courses, 
@@ -60,24 +64,10 @@ def get_data():
         }
     return data
 
+def get_five_courses(): ### JUST FOR TESTING
+    return current_courses[7:12]
 
-def get_current_title(idx):
-    """
-    Returns the title of the course with the given index in the list of current courses
-
-    Parameter:
-        idx (int): index of the course
-    Returns:
-        title (str) of the course
-    """
-    if isinstance(idx, int) and idx < len(current_courses):
-        #print(f"*** Found current course {current_courses[idx]['title']} at index {idx}")
-        return current_courses[idx]['title']
-    else:
-        print(f"*** get_current_title(): NO CURRENT COURSE FOUND FOR IDX {idx}")
-        return None
-
-def get_past_title(idx):
+def get_past_title(idx): ### JUST FOR TESTING
     """
     Returns the title of the course with the given index in the list of past courses
 
@@ -91,6 +81,22 @@ def get_past_title(idx):
         return past_courses[idx]['title']
     else:
         print(f"*** get_past_title(): NO PAST COURSE FOUND FOR IDX {idx}")
+        return None
+
+def get_current_title(idx):### JUST FOR TESTING
+    """
+    Returns the title of the course with the given index in the list of current courses
+
+    Parameter:
+        idx (int): index of the course
+    Returns:
+        title (str) of the course
+    """
+    if isinstance(idx, int) and idx < len(current_courses):
+        #print(f"*** Found current course {current_courses[idx]['title']} at index {idx}")
+        return current_courses[idx]['title']
+    else:
+        print(f"*** get_current_title(): NO CURRENT COURSE FOUND FOR IDX {idx}")
         return None
 
 def get_past_idx(title):
@@ -113,15 +119,24 @@ def get_past_idx(title):
         print(f"*** get_past_idx(): NO PAST IDX FOUND FOR TITLE {title}")
         return None
 
+def get_details(idx):
+    """
+    Returns dictionary with all attributes of a current course
+
+    Parameter:
+        idx: index of the course to return
+    Returns:
+        all attributes of the course
+    """
+    return current_courses[idx]
 
 # Define the intent detection function
-def detect_intent(user_input, current_state, last_recommendations):
+def detect_intent(user_input, last_recommendations):
     """
     Detects the intent of a user's input
 
     Parameters:
         user_input (str): the user's input
-        current_state (str): the state the chatbot is currently in
         last_recommendations (list): list of the last recommended courses
     Returns:
         detected_intent: the intent it detected
@@ -129,123 +144,124 @@ def detect_intent(user_input, current_state, last_recommendations):
         detected_courses: tuple (course index, x) with x being either the similarity (float) between the title and user input (if detected_intent == reference) or the feedback for the course ('liked' or 'disliked') (if detected_intent == feedback)
     """
     print("***detect_intent(): Detecting intent...")
+    intent_similarities = {'free_description': 0.0, 'liked_course_reference': 0.0, 'feedback': 0.0}
     user_embedding = model.encode([user_input])[0]
-    #max_similarity = 0
     detected_intent = "other"  # Default intent
-    intent_similarities = {}
     chatbot_reply = ""
-    
-    # Compare user input with each intent category
-    for intent, examples in intent_embeddings.items():
-        # Only check those that are allowed in the current state
-        #if not intent in intent_states[current_state]:
-        #    intent_similarities[intent] = 0.0
-        #    continue
-        # Only allow feedback if there have been recommendations
-        if intent == 'feedback' and len(last_recommendations) == 0:
-            intent_similarities[intent] = 0.0
-            continue
-        similarity = float(cosine_similarity([user_embedding], examples).max())
-        intent_similarities[intent] = similarity
 
-    # Get the intent with the highest similarity
-    sorted_intents = dict(sorted(intent_similarities.items(), key=lambda item: item[1])[::-1])
-    #print(f"***Before sorting: {intent_similarities}\n***After sorting: {sorted_intents}")
-    print(f"***detect_intent(): Intent similarities: {sorted_intents}")
-    most_sim = next(iter(sorted_intents))
-
-    # MAYBE?!? If feedback is possible in the current state, choose it if the similarity is high enough (even if it is not the most similar)
-    ### -> FIRST TEST WITHOUT THIS! ## HASN'T BEEN RELEVANT YET!
+    # First check if the user has explicitly stated the intent at the beginning of the message
+    if user_input.lower().startswith("free:"):
+        detected_intent = 'free_description'
+        intent_similarities['free_description'] = 1.0
+    elif user_input.lower().startswith("ref:"):
+        detected_intent = 'liked_course_reference'
+        intent_similarities['liked_course_reference'] = 1.0
+    elif user_input.lower().startswith("feedback:"):
+        detected_intent = 'feedback'
+        intent_similarities['feedback'] = 1.0
     
-    # If it is detected as a free description, but the probability of it being a course reference is also relatively high, try to find a matching course first
-    #if most_sim[0] == 'free_description' and second_sim[0] == 'liked_course_reference' and second_sim[1] > 0.5:
-    if most_sim == 'free_description' and intent_similarities['liked_course_reference'] > 0.7:
-        detected_intent = "liked_course_reference"
-        print("\ndetect_intent(): ***Changed intent to 'liked_course_reference'***\n")
-    elif intent_similarities[most_sim] >= 0.4:
-        detected_intent = most_sim
+    # If no intent was given, select the one which is most similar to the input
     else:
-        detected_intent = "other"
+        # Compare user input with each intent category
+        for intent, examples in intent_embeddings.items():
+            # Only allow feedback if there have been recommendations
+            if intent == 'feedback' and len(last_recommendations) == 0:
+                intent_similarities[intent] = 0.0
+                continue
+            similarity = float(cosine_similarity([user_embedding], examples).max())
+            intent_similarities[intent] = similarity
 
+        # Get the intent with the highest similarity
+        sorted_intents = dict(sorted(intent_similarities.items(), key=lambda item: item[1])[::-1])
+        #print(f"***Before sorting: {intent_similarities}\n***After sorting: {sorted_intents}")
+        print(f"***detect_intent(): Intent similarities: {sorted_intents}")
+        most_sim = next(iter(sorted_intents))
+        
+        # If it is detected as a free description, but the probability of it being a course reference is very close, try to find a matching course first
+        ### LASSE ICH ERSTMAL WEG, DA JETZT OFT PROBLEM, DASS FREE ALS REFERENCE ERKANNT WIRD
+        #if most_sim == 'free_description' and intent_similarities['free_description'] - intent_similarities['liked_course_reference'] <= 0.05:
+        #    detected_intent = "liked_course_reference"
+        #    print("\ndetect_intent(): ***Changed intent to 'liked_course_reference'***\n")
 
-    """
-    for intent, examples in intent_embeddings.items():
-        # Only check those that are allowed in the current state
-        if not intent in intent_states[current_state]:
-            continue
-        similarity = cosine_similarity([user_embedding], examples).max()
-        if similarity > max_similarity:
-            #if detected_intent == "liked_course_reference" and intent == "free_description":
+        # If the similarity score of the intent with the highest similarity to the input is above the threshold, set it as the detected intent
+        # Otherwise, detect_intent is "other" as initialized above
+        if intent_similarities[most_sim] >= 0.4:
+        #elif intent_similarities[most_sim] >= 0.4:
+            detected_intent = most_sim
 
-            max_similarity = similarity
-            detected_intent = intent
-    """
-
-    # Threshold for valid intent detection
-    #if max_similarity < 0.4:  # Adjust threshold as needed
-    #    detected_intent = "other"
-            
     # If the intent was detected to be a reference to a previously liked course, check which course the user is referring to
     if detected_intent == "liked_course_reference":
         print("***detect_intent(): TITLE REFERENCE DETECTED!")
-        # First check if a title is (or multiple titles are) spelled out exactly ### LASSE DAS WEG; SONST WERDEN WEITERE TITEL, DIE NICHT GENAU RICHTIG GESCHRIEBEN WURDEN, IGNORIERT
-        #detected_courses = []
+        # First check if a title is spelled out exactly (only one reference per message allowed)
         best_fit = ("", 0.0)
         all_titles = [c['title'] for c in past_courses]
         for title in all_titles:
+            ##### MAYBE EHER VARIANTE NUTZEN, DIE AUCH LEICHTE ABWANDLUNGEN (z.B. DURCH TIPPFEHLER) ERKENNT
+            ####### DANN VLLT LISTE (ODER DICT MIT SIMILARITY-WERTEN) ERSTELLEN & DA ALLE TITEL, DIE ÄHNLICH GENUG SIND, DRIN SPEICHERN & AM ENDE BEST FIT RETURNEN
             if title in user_input:
                 idx = get_past_idx(title)
                 print(f"***detect_intent(): Found EXACT Title: {title} (by index {idx}: {past_courses[idx]['title']})")
                 #detected_courses.append((title, 1.0))  ### FOR NOW ONLY 1 REFERENCED COURSE ALLOWED PER MESSAGE
                 return detected_intent, intent_replies[detected_intent], (idx, 1.0)
-                
-        # If any titles were directly found in the input, return them
-        #if detected_courses:
-        #    return intent_replies[detected_intent], detected_courses
-        
-        # For titles not spelled out exactly: check if parts of them are included in the input to weigh them differently   #### FOR NOW ONLY 1 REFERENCED COURSE ALLOWED PER MESSAGE
-        # Check if any words from the input match words from the titles
-        possible_titles = []
-        ### LEMMATIZE!!! -> remove stopwords & auch Worte wie 'I', 'like', 'liked', 'course', ... (auch für similarity unten; maybe dann auch bei Titeln entfernen)
-        split_input = re.sub(r'[^\w\s]', '', user_input).lower().split()
-        split_titles = {t: t.lower().split() for t in all_titles}
+            
+        """ # NOT SURE IF THAT IS EVEN NECESSARY -> THE MORE WORDS FROM THE TITLE MATCH THE INPUT, THE MORE SIMILAR ANYWAY???            
+        # Check if any words from the input match words from the titles to weigh those courses them differently
+        possible_titles = []  # Tuples: (title, percentage of matched words)
+        ### LEMMATIZE!!! -> remove stopwords & auch Worte wie 'I', 'like', 'liked', 'course', ... 
+        ###### (auch für similarity unten; maybe dann auch bei Titeln entfernen)
+        ### MAYBE AUCH SPEICHERN, WIE VIELE WÖRTER (BZW VLLT BESSER WORTANTEIL (GEFUNDENE WÖRTER/WÖRTER IN TITEL)) 
+        ###### -> JE MEHR WÖRTER VOM TITEL ENTHALTEN SIND, UMSO WAHRSCHEINLICHER IST DER KURS GEMEINT
+        ###### -> für similarity dann vllt: sim = (sim+Wortanteil)/2 ## SCHAUEN, WIE GUT DAS FUNKTIONIERT (ODER OB ES SIM EHER VERKLEINERT)
+        #split_input = re.sub(r'[^\w\s]', '', user_input).lower().split()
+        split_input = user_input.lower().split()
+        split_input = [word.translate(str.maketrans('', '', string.punctuation)) for word in split_input]
+        split_titles = {t: t.lower().translate(str.maketrans('', '', string.punctuation)).split() for t in all_titles}
+        #split_titles = {t: t.lower().split() for t in all_titles}
         for title, t in split_titles.items():
+            matched_words = 0
             for word in split_input:
                 if word in t:
-                    possible_titles.append(title)
-        #print("INPUT:", split_input, "TITLES:", split_titles)
+                    matched_words += 1
+            if matched_words > 0:
+                match_percentage = matched_words/len(t)
+                possible_titles.append((title, match_percentage))
+                print(f"\n***detect_intent(): matching title '{title}' (split: {t}; len of t: {len(t)})")
+                print(f"***detect_intent(): -> matched words = {matched_words} -> percentage = {match_percentage}")
+        print(f"***detect_intent(): --> matched titles: {possible_titles}")"""
         #print(f"POSSIBLE TITLES: {possible_titles}")
         
-        
+        # Substract the difference between the similarity of liked course references and free description from the threshold  ### OR BETTER JUST SIM OF REFERENCE??
+        # -> the more certain it is to be a reference, the lower is the threshold for the title similarity
+        title_threshold = 0.55 - (intent_similarities['liked_course_reference'] - intent_similarities['free_description'])
+        print(f"***detect_intent(): Title threshold = {title_threshold}")
+
         # Check if the input is similar enough to any of the titles
         #print("Checking similarities of titles...")
+        ##### WORTANTEIL VON OBEN MIT EINBERECHNEN #### ÜBERHAUPT USEFUL?????? -> JE MEHR WÖRTER GLEICH SIND, UMSO MORE SIMILAR MÜSSTE ES EH SEIN???
         for title, title_emb in title_embeddings.items():  ### KANN ICH SONST AUCH ÜBER INDEX MACHEN -> BRAUCHE DANN TITLE NICHT MEHR IN TITLE_EMBEDDINGS -> IST DANN NUR NOCH LIST STATT DICT
-            # If the title was already detected, skip it and continue with next title
-            #if title in detected_courses:   #### FOR NOW ONLY 1 REFERENCED COURSE ALLOWED PER MESSAGE
-            #    continue
             title_sim = cosine_similarity([user_embedding], [title_emb])
             #print(f"{title}: {title_sim}")
             # If a part of the title was detected in user input, set the threshold lower
-            if title in possible_titles and title_sim > 0.4 and title_sim > best_fit[1]:
+            """if title in possible_titles and title_sim > 0.4 and title_sim > best_fit[1]:
                 #detected_courses.append((title, title_sim))   #### FOR NOW ONLY 1 REFERENCED COURSE ALLOWED PER MESSAGE
                 idx = get_past_idx(title)
                 print(f"***detect_intent(): Found PARTIALLY SIMILAR Title: {(title, title_sim)} -- Title by idx: {get_past_title(idx)}")
-                best_fit = (idx, title_sim)
+                best_fit = (idx, title_sim)"""
+            
+            ## JUST TESTING 
+            if title_sim > 0.3:
+                print(f"***detect_intent(): Title similarity of '{title}': {title_sim}")
                 
-            elif title_sim > 0.6 and title_sim > best_fit[1]:  # Higher threshold for titles of which no part has been detected
-            #if title_sim > 0.6 and title_sim > best_fit[1]:
+            #elif title_sim > 0.6 and title_sim > best_fit[1]:  # Higher threshold for titles of which no part has been detected
+            # If the similarity score of the title is above the threshold and higher than the currently highest one, save the courses index and the score as best fit
+            if title_sim > title_threshold and title_sim > best_fit[1]:
                 #detected_courses.append((title, title_sim))   #### FOR NOW ONLY 1 REFERENCED COURSE ALLOWED PER MESSAGE
                 idx = get_past_idx(title)
                 print(f"***detect_intent(): Found SIMILAR Title: {(title, title_sim)} -- Title by idx: {get_past_title(idx)}")
                 best_fit = (idx, title_sim)
                 
-        # If none were found, break input down into multiple strings, separated by "and", "," and "or"
-        ### IMPLEMENT ##### NO, PROB WONT DO THAT
-                
-        # If any similar titles were found in the input, return them
-        #if detected_courses:   #### FOR NOW ONLY 1 REFERENCED COURSE ALLOWED PER MESSAGE
-        #    return detected_intent, intent_replies[detected_intent], detected_courses
-        if best_fit[1] > 0.5:
+        # Return the best fitting title, if any was found with a similarity above the threshold (otherwise, best_fit is ('other', 0.0))
+        if best_fit[1] > 0.0:
             return detected_intent, intent_replies[detected_intent], best_fit
         # Otherwise change the intent to free_description
         else:  ### MAYBE BESSER: VERSUCHE NÄCHST HÖCHSTEN INTENT?!? -> DAFÜR AUSFÜHRUNG DER INTENTS ALS EIGENE FUNKTIONEN (& Liste mit similarities übergeben; + default-intent, der aufgerufen wird, wenn Liste leer)?!?
@@ -264,8 +280,7 @@ def detect_intent(user_input, current_state, last_recommendations):
         else:
             #### MAYBE: IF SIMILARITY ZU FEEDBACK ÜBER BESTIMMTEN THRESHOLD: NACHRICHT AUSGEBEN, DASS ERKANNT WURDE, DASS USER FEEDBACK GEBEN WILL, ABER NICHT ERKANNT WURDE, FÜR WELCHE(N) KURS(E) BZW SENTIMENT -> KURZE BESCHREIBUNG VON FEEDBACK-FORMAT & WEITER STATUS == FEEDBACK
             ############ & FALLS UNTER THRESHOLD: NÄCHST-HÖCHSTEN INTENT VERSUCHEN
-            chatbot_reply += "I think you wanted to give feedback to one or more of the recommendated courses, but I could not clearly understand you. If you want to provide feedback, please stick to the following rules: ..."
-            ## RULES AUFSCHREIBEN!!!!!
+            chatbot_reply += "I think you wanted to give feedback to one or more of the recommendated courses, but I could not clearly understand you. Please click on the button 'Feedback Hint' below the chat to find out how to properly give feedback."
             return detected_intent, chatbot_reply, []
 
             #detected_intent, intent_replies[detected_intent], []
@@ -371,7 +386,7 @@ def give_feedback(user_input, last_recommendations):
     # If only one course was recommended, directly check the sentiment
     if len(last_recommendations) == 1:
         print(f"***give_feedback(): Only one recommendation: {last_recommendations[0]}")
-        sentiment = sentence_sentiment
+        sentiment = sentence_sentiment(user_input)
         return [(last_recommendations[0], sentiment)]
 
     # #### BERÜCKSICHTIGEN, OB PUNKT SATZENDE IST ODER ZUR NUMMERIERUNG GEHÖRT (z.B. "I liked the 1. and 2. course")
@@ -439,45 +454,227 @@ def give_feedback(user_input, last_recommendations):
     return given_feedback
 
 
-###--- User Preference Management ---###
-def update_user_profile(user_profile, pref_embedding = None, rated_course = None, liked=True, learning_rate=0.1):
+###--- User Preference Management ---### 
+##### EVTL UMBENENNEN ZU update_user_preferences
+def update_user_profile(user_profile, input_embedding = None, rated_course = None, liked=True, learning_rate=0.25):
     """
     Updates the user's preferences according to a free description, a reference to a liked course, or given feedback
 
     Parameters: 
         user_profile (array?): current embedding of the user's preferences
-        pref_embedding (array?)*: embedding of either the user's description, a previously liked course, or a course the user gave feedback for
+        input_embedding (array?)*: embedding of either the user's free description (transformed into a soup)
         rated_course ((int, str))*: either (index, 'past') of a previously liked course or (index, 'current') of a course the user gave feedback for
         liked (bool): if the user liked the course / the recommendation of the course; for descriptions always True
         learning_rate (float): how strong the feedback should influence the user's preferences
-        * either pref_embedding or rated_course is necessary
+        * either input_embedding or rated_course is necessary
     Returns: 
         updated user_profile
     """
     print("***update_user_profile(): Updating user profile...")
-    if pref_embedding is None:
+    # If no input_embedding is given, set it to the embedding of the rated course
+    if input_embedding is None:
         print(f"***update_user_profile(): Using: {rated_course}...")
         if rated_course[1] == 'past':
             #course_idx = [c['title'] for c in past_courses].index(rated_course[0]) ### ONLY NECESSARY, IF COURSES SAVED WITH TITLE INSTEAD OF IDX
-            #pref_embedding = past_embeddings[course_idx]
-            pref_embedding = past_embeddings[rated_course[0]]  ## IF COURSES SAVED BY IDX
+            #input_embedding = past_embeddings[course_idx]
+            input_embedding = past_embeddings[rated_course[0]]  ## IF COURSES SAVED BY IDX
         else:
             #course_idx = [c['title'] for c in current_courses].index(rated_course[0]) ### ONLY NECESSARY, IF COURSES SAVED WITH TITLE INSTEAD OF IDX
-            #pref_embedding = current_embeddings[course_idx]
-            pref_embedding = current_embeddings[rated_course[0]]  ## IF COURSES SAVED BY IDX
+            #input_embedding = current_embeddings[course_idx]
+            input_embedding = current_embeddings[rated_course[0]]  ## IF COURSES SAVED BY IDX
     if user_profile is not None:
         if liked:  # Positive feedback, liked course or free description
-            user_profile += learning_rate * pref_embedding  # Make the embedding of the user's preferences more similar to the liked course
+            user_profile += learning_rate * input_embedding  # Make the embedding of the user's preferences more similar to the input or liked course
         else:      # Negative feedback
-            user_profile -= learning_rate * pref_embedding  # Make the embedding of the user's preferences less similar to the disliked course
-    else: ### CREATE A CASE FOR NO PROFILE & DISLIKED??
-        # If no profile exists, set user's embedding to the liked course's embedding (this is the case, if a user starts by refering to a previously liked course)
-        user_profile = pref_embedding
-    ### DO I HAVE TO RETURN IT?? OR CAN I MANAGE (SAVE & CHANGE) IT DIRECTLY IN THIS FILE?? -> I think I can't?!?
+            user_profile -= learning_rate * input_embedding  # Make the embedding of the user's preferences less similar to the disliked course
+    else:
+        # If no profile exists, set user's embedding to the input embedding
+        user_profile = input_embedding
     return user_profile
 
 
 ###--- Recommendation Generation ---###
+
+def find_modules(user_input):
+    """
+    Find modules in given input
+
+    Parameter:
+        user_input (str): the user's input in which modules should be found
+    Returns:
+        list of all found modules
+
+    """
+    print(f"\n\n***find_modules(): START FINDING MODULES")
+    # Module names are constructed from 
+    # > "CS-" for Cognitive Science (dataset includes only Cognitive Science courses, therefore all modules start with "CS-")
+    # > + "[B/M][WP/W/P]-" -- "B" if Bachelor, "M" if Master; "WP" if elective, "P" if compulsory, "W" if "Distinguishing Elective Courses"
+    # > + Short form of the area (e.g. "AI")
+    all_modules = list(set([m.split(" > ")[0].split(",")[0] for m in current_attributes['module']]))
+    all_modules.sort()
+    modules = []
+    found_area = None
+    found_program = list(module_dict['study_program'].values())
+    found_module = list(module_dict['module'].values())
+
+    # First look for an area - if that is not given, return an empty list
+    # Split the input into words and remove punctuation
+    split_input = user_input.lower().split()
+    split_input = [word.translate(str.maketrans('', '', string.punctuation)) for word in split_input]
+    #print(f"***find_modules(): split_input: {split_input}")
+    for key, area in module_dict['area'].items():
+        #print(f"\n***find_modules(): checking ({key}, {area})")
+        split_key = key.split()
+        if len (split_key) == 1:  # if key is a single word, search it in split input
+            if key in split_input:
+                found_area = area
+                #print(f"***find_modules(): Found area: {found_area} (from input '{key}')")
+                break # Allow only 1 module per message   #### TELL USER!!!
+        else:  # if key consist of multiple words, search for it in the input sentence(s)
+            if key in user_input.lower():
+                found_area = area
+                #print(f"***find_modules(): Found area: {found_area} (from input '{key}')")
+                break
+
+    if found_area is None:
+        return []
+    for p in module_dict['study_program']:
+        if p in user_input.lower():
+            found_program = [module_dict['study_program'][p]]
+            #print(f"***find_modules(): Found study_program: {module_dict['study_program'][p]} (from input '{p}')")
+            break
+    # If found area is empty, it is Distinguishing Elective Courses, which is module "W"
+    if found_area == "":
+        found_module = "W"
+    else:
+        for m in module_dict['module']:
+            if m in user_input.lower():
+                #print(f"***find_modules(): Found module: {module_dict['module'][m]} (from input '{m}')")
+                #found_module.append(module_dict['module'][m])
+                found_module = [module_dict['module'][m]]
+                break
+    #print(f"***find_modules(): found_program: {found_program} -- found_module: {found_module}")
+
+    # Combine all found parts and append and return all existing modules
+    for p in found_program:
+        for m in found_module:
+            module = f"CS-{p}{m}{found_area} - "
+            #print(f"***find_modules(): module in for-loop: {module}")
+            modules += [mod for mod in all_modules if module in mod]
+    print(f"***find_modules(): found modules: {modules}")
+    return modules
+    
+
+def input_soup(user_input):
+    """
+    Creates a soup from the user input that has the same scheme as the course-soups for better comparison
+
+    Parameter:
+        user_input (str): the user's input that should be transformed into a soup
+    Returns:
+        user_soup
+    """
+    print(f"\n\n***input_soup(): START CREATING SOUP")
+    # Attributes that are relevant for the soup, except from title and description
+    soup_attributes = ['status', 'mode', 'ects', 'sws', 'lecturer_short', 'module', 'area']
+
+    # Get a dictionary containing all possible values for each attribute that is relevant for the soup
+    #check_attr = {a: list(v) for a, v in all_attr.items() if a in [attr.lower() for attr in soup_attributes]}
+    check_attr = {a: v for a, v in current_attributes.items() if a in soup_attributes} ### VON current_attr (da nur mit current_courses verglichen) ODER BESSER BEIDEN (da es auch Werte geben kann, die es in früheren Semestern gab, aber jetzt nicht mehr)???
+    #print(f"***input_soup(): all values for 'sws': {check_attr['sws']}")
+    #print(f"all_attr: {all_attr}\ncheck_attr: {check_attr}")
+    #print(f"***input_soup(): all attributes to check: {check_attr.keys()}")
+
+    # Extract the relevant attributes from the input
+    found_attr = {key: "" for key in check_attr}
+    #print(f"***input_soup(): found_attr: {found_attr}")
+
+    """for attr, val in check_attr.items():
+        if attr in user_input.lower():
+            print(f"Found ATTRIBUTE '{attr}' in input!")
+
+        else:
+            for v in val:
+                if v.lower() in user_input.lower():
+                    print(f"Found VALUE '{v}' (for attr '{attr}') in input!")"""
+    for attr, val in check_attr.items():
+        #print(f"***input_soup(): checking attr '{attr}'")
+        if attr == 'module':
+            #found_attr[attr] = str(find_modules(user_input))
+            found_attr[attr] = find_modules(user_input)
+            #print(f"")
+            continue
+        # Check if a value is found
+        for v in val:
+            #print(f"***input_soup(): -- checking value '{v}'")
+
+            if str(v).lower() in user_input.lower() and str(v) != '':
+                attr_key = attr
+
+                # If the value appears in multiple keys (attributes), check if one of the attributes is stated in the input
+                all_keys = [key for key, values in check_attr.items() if str(v) in values]
+                #print(f"ALL KEYS: {all_keys}")
+                #print(f"\n***input_soup(): Found VALUE '{v}' (for attr '{attr}') in input! -> exists in {len(all_keys)} keys!")
+
+                if len(all_keys) > 1:
+                    input_keys = [key for key in all_keys if key in user_input.lower()]
+                    #print(f"***input_soup(): ALL KEYS: {all_keys} -- INPUT KEYS: {input_keys}")
+                    if len(input_keys) > 1:
+                        #print(f"***input_soup(): selecting closest key...")
+                        # Select the key that is closest to the found value in the sentence
+                        split_input = user_input.lower().split()
+                        split_input = [word.translate(str.maketrans('', '', string.punctuation)) for word in split_input]
+
+                        # Get the positions of the value and the keys
+                        val_idx = split_input.index(str(v))
+                        key0_idx = split_input.index(input_keys[0])
+                        key1_idx = split_input.index(input_keys[1])
+                        
+                        # Compute the distances
+                        dist_key0 = abs(key0_idx - val_idx)
+                        dist_key1 = abs(key1_idx - val_idx)
+                        
+                        # Determine the closest word; if both have the same distance, choose the key behind the value
+                        if (dist_key0 < dist_key1) or (dist_key0 == dist_key1 and key0_idx > val_idx):
+                            attr_key = input_keys[0]
+                        #elif dist_key1 < dist_key0:
+                        elif (dist_key0 > dist_key1) or (dist_key0 == dist_key1 and key1_idx > val_idx):
+                            attr_key = input_keys[1]
+                        #print(f"***input_soup(): CHOSE KEY: {attr_key}")
+                    # If the current key is not in the input, skip this value (in case the other key is in the input, the value is added to it when that key is looped through)
+                    elif len(input_keys) == 1 and input_keys[0] != attr_key:
+                        continue
+                        
+                # If a value for the attribute was already found, just add the new one to it, separated by a comma
+                if found_attr[attr_key] != "":
+                    #print(f"***input_soup(): ATTRIBUT WURDE SCHON BELEGT MIT '{found_attr[attr_key]}'")
+                    # Only add the value if it is not yet in the string
+                    if not str(v) in found_attr[attr_key]:
+                        found_attr[attr_key] += f", {str(v)}"
+                        #print(f"***input_soup(): attribut '{attr_key}' (added): {found_attr[attr_key]}")
+                else:
+                    if not str(v) in found_attr[attr_key]:
+                        found_attr[attr_key] += str(v)
+                        #print(f"***input_soup(): attribut '{attr_key}': {found_attr[attr_key]}")
+ 
+        #print(f"\nLooking at attribute {attr}...")
+        #if attr in user_input.lower():  ##### BRINGT DAS ÜBERHAUPT WAS?????
+            #print(f"***input_soup(): Found ATTRIBUTE '{attr}' in input!")
+            # If the attribute hasn't been found already, look for its value
+            #if found_attr[attr] == "":
+                #print(f"***input_soup(): -> It's new!")
+                ### Can't just look for exact values in input, as those would have been found before
+                ### MAYBE JE NACH ATTRIBUT UNTERSCHIEDLICHE WÖRTER (Z.B. 'ARTIFICIAL INTELLIGENCE' ETC.) SUCHEN???
+                ### ODER HIER NACH ALTERNATIV-BEZEICHNUNGEN/TRANSLATIONS SUCHEN (IN EIGENEM DICT)
+            #else:
+                #print(f"***input_soup(): -> Already found '{attr}' -> skipping!")
+
+
+    # Create soup  ##### MAYBE REMOVE FOUND ATTRIBUTES FROM INPUT AND ONLY PUT REST OF INPUT IN DESCRIPTION???
+    soup = f"Title: . Description: {user_input}. Status: {found_attr['status']}. Mode: {found_attr['mode']}. ECTS: {found_attr['ects']}. SWS: {found_attr['sws']}. Lecturer: {found_attr['lecturer_short']}. Module: {found_attr['module']}. Area: {found_attr['area']}."
+    print(f"\n***input_soup(): FINAL found_attr: {found_attr}\n***input_soup(): Soup: '{soup}'")
+    return soup
+
 
 def input_embedding(user_input):
     """
@@ -488,7 +685,9 @@ def input_embedding(user_input):
         Returns:
             input_emb: the embedding of the input
     """
-    input_emb = model.encode([user_input])[0]
+    # Get input in soup-format
+    soup = input_soup(user_input)
+    input_emb = model.encode([soup])[0]
     return input_emb
 
 
@@ -511,16 +710,24 @@ def recommend_courses(user_profile, rated_courses, previously_liked_courses, amo
     # Rank courses by similarity
     #top_courses_indices = similarities.argsort()[-amount:][::-1]  ## AMOUNT AFTER DELETING ALREADY RATED INDICES
     top_courses_indices = similarities.argsort()[::-1]
+    #print(f"***recommend_courses(): Initial recs: {[current_courses[idx]['title'] for idx in top_courses_indices[:amount]]}")
 
+    # Get the titles of previously liked courses
     liked_titles = [past_courses[idx]['title'] for idx in previously_liked_courses]
 
     # Delete already rated courses from top recommendations and select the specified amount of recommendations
     #top_indices = [int(idx) for idx in top_courses_indices if idx not in rated_courses][:amount]
     top_indices = [int(idx) for idx in top_courses_indices if idx not in rated_courses]
-    print(f"***recommend_courses(): Top recommendations that were liked in the past: {[idx for idx in top_indices if past_courses[idx]['title'] in liked_titles]}")
-    cleaned_indices = [idx for idx in top_indices if past_courses[idx]['title'] not in liked_titles][:amount]
+    #print(f"***recommend_courses(): Without already rated courses: {[current_courses[idx]['title'] for idx in top_indices[:amount]]}")
+
+    #print(f"***recommend_courses(): Top recommendations that were liked in the past: {[current_courses[idx]['title'] for idx in top_indices if current_courses[idx]['title'] in liked_titles]}")
+    
+    # Delete all titles that are already in the previously liked courses
+    cleaned_indices = [idx for idx in top_indices if current_courses[idx]['title'] not in liked_titles][:amount]
 
     top_indices_sim = [(idx, float(similarities[idx])) for idx in cleaned_indices]
+    print(f"***recommend_courses(): Recommended courses: {[(current_courses[idx]['title'], sim) for (idx, sim) in top_indices_sim[:amount]]}")
+
 
     #top_courses_indices_sim = [float(similarities[idx]) for idx in top_courses_indices]  ### JUST FOR TESTING
     #top_courses = [current_courses[i] for i in top_courses_indices]   ### USE IDX INSTEAD; JUST FOR TESTING
@@ -538,15 +745,17 @@ def write_recommendation(recommended_courses):
     Parameters:
         recommended_courses (list of tuples): top 5 recommendations + their similarities to the user preferences
     Returns:
-        chatbot message
+        response: chatbot message before showing the recommendations
+        response_end: chatbot message after showing the recommendations
         to_recommend: indices of the recommended courses
     """
     response = ""
+    response_end = ""
     to_recommend = []
     #print(f"***Thinking about recommending one of these: {[get_current_title(c[0]) for c in recommended_courses]}")
     #new_rec_courses = [c for c in recommended_courses]
     for (c, sim) in recommended_courses:
-        if sim >= 0.333:
+        if sim >= 0.7:
             to_recommend.append(c)
             #print(f"***Good match: {get_current_title(c)} -- {sim}")
     #print(f"\n***TO RECOMMEND: {to_recommend} (LEN: {len(to_recommend)})***\n")
@@ -554,13 +763,15 @@ def write_recommendation(recommended_courses):
         response = "I found some courses you might like:  \n"
         #rec_string = "\n".join([get_current_title(c[0]) for c in recommended_courses])
         rec_string = ""
-        for idx, c in enumerate(recommended_courses, start = 1):
-            rec_string += f"{idx}: {get_current_title(c[0])}  \n"
-        response += rec_string
-        response += f"\nPlease tell me if these courses sound interesting to you.  \nHint: {instructions['feedback']} "
+        #for idx, c in enumerate(recommended_courses, start = 1):
+        #    rec_string += f"{idx}: {get_current_title(c[0])}  \n"
+        #response += rec_string
+        response_end += f"\nPlease tell me if these courses sound interesting to you.  \nIf you haven’t done that already, please check out the ‘Feedback Hints’ (click on the button below the chat) to find out how to properly give feedback. "
     elif len(to_recommend) == 1:
-        response = f"I found a course you might like:  \n- {get_current_title(to_recommend[0])}\nFeedback would help a lot to improve further recommendations. Please tell me if this course sounds interesting or not. "
+        #response = f"I found a course you might like:  \n- {get_current_title(to_recommend[0])}  \nFeedback would help a lot to improve further recommendations. Please tell me if this course sounds interesting or not. "
+        response = f"I found a course you might like:"
+        response_end += f"Feedback would help a lot to improve further recommendations. Please tell me if this course sounds interesting or not. "
     else:
         response = "I need some more information to generate good recommendations for you. Could you tell me more about what kind of course you are looking for? Or is there any course you liked in the past that you didn't tell me about yet? "
     
-    return response, to_recommend
+    return response, response_end, to_recommend

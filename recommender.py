@@ -743,7 +743,7 @@ def recommend_courses(user_profile, rated_courses, previously_liked_courses, amo
 
     else:
         # Check if the similarity of any of the courses is above the threshold and select the corresponding response to return together with the list of courses to recommend
-        for course in cleaned_indices[amount]:
+        for course in cleaned_indices[:amount]:
             if float(similarities[course]) >= 0.7:
                 to_recommend.append(course)
         if len(to_recommend) > 1:

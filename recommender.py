@@ -351,7 +351,7 @@ def sentence_sentiment(sentence):
         'liked' or 'disliked'
     """
     sentiment_dict = {
-        "liked": ["liked", "like", "interesting", "good", "awesome", "nice", "great"],
+        "liked": ["liked", "like", "love", "interesting", "good", "awesome", "nice", "great"],
         "disliked": ["dislike", "hate", "boring", "bad"],
         "negative": ["not", "don't", "didn't", "doesn't", "aren't", "isn't"]
     }
@@ -702,76 +702,57 @@ def recommend_courses(user_profile, rated_courses, previously_liked_courses, amo
             amount (int): how many courses should be recommended - default: top 5
             filter (dict): all selected filters (IF IMPLEMENTED)
         Returns: 
-            list of tuples (recommended course index, similarity to user profile)
+            response: chatbot message before showing the recommendations
+            response_end: chatbot message after showing the recommendations
+            to_recommend: indices of the recommended courses
     """
     # Compute cosine similarity between the user profile and course embeddings
     similarities = cosine_similarity([user_profile], current_embeddings)[0]
 
     # Rank courses by similarity
-    #top_courses_indices = similarities.argsort()[-amount:][::-1]  ## AMOUNT AFTER DELETING ALREADY RATED INDICES
     top_courses_indices = similarities.argsort()[::-1]
-    #print(f"***recommend_courses(): Initial recs: {[current_courses[idx]['title'] for idx in top_courses_indices[:amount]]}")
+
+    #### MAYBE DELETE ALL COURSES WITH SIMILARITY BELOW THRESHOLD ALREADY HERE
+    #### THEN CHECK IF LIST OF POSSIBLE RECOMMENDATIONS IS EMPTY: IF YES, SKIP REST AND WRITE RESPONSE
+  
+    # Delete already rated courses from top recommendations and select the specified amount of recommendations
+    top_indices = [int(idx) for idx in top_courses_indices if idx not in rated_courses]
 
     # Get the titles of previously liked courses
     liked_titles = [past_courses[idx]['title'] for idx in previously_liked_courses]
 
-    # Delete already rated courses from top recommendations and select the specified amount of recommendations
-    #top_indices = [int(idx) for idx in top_courses_indices if idx not in rated_courses][:amount]
-    top_indices = [int(idx) for idx in top_courses_indices if idx not in rated_courses]
-    #print(f"***recommend_courses(): Without already rated courses: {[current_courses[idx]['title'] for idx in top_indices[:amount]]}")
-
-    #print(f"***recommend_courses(): Top recommendations that were liked in the past: {[current_courses[idx]['title'] for idx in top_indices if current_courses[idx]['title'] in liked_titles]}")
-    
     # Delete all titles that are already in the previously liked courses
-    cleaned_indices = [idx for idx in top_indices if current_courses[idx]['title'] not in liked_titles][:amount]
+    cleaned_indices = [idx for idx in top_indices if current_courses[idx]['title'] not in liked_titles]
 
-    top_indices_sim = [(idx, float(similarities[idx])) for idx in cleaned_indices]
-    print(f"***recommend_courses(): Recommended courses: {[(current_courses[idx]['title'], sim) for (idx, sim) in top_indices_sim[:amount]]}")
-
-
-    #top_courses_indices_sim = [float(similarities[idx]) for idx in top_courses_indices]  ### JUST FOR TESTING
-    #top_courses = [current_courses[i] for i in top_courses_indices]   ### USE IDX INSTEAD; JUST FOR TESTING
-    #print(f"\ntop_courses_indices: {top_courses_indices}\ntop_courses_indices_sim: {top_courses_indices_sim}\ntop_courses: {[c['title'] for c in top_courses]}")
-    #print(f"WITH NEW TECHNIQUE: {top_indices_sim}")
-    
-    #return list(zip(top_courses, top_courses_indices_sim))  ### NOT NECESSARY IF USING JUST IDX
-    return top_indices_sim
-
-
-def write_recommendation(recommended_courses):
-    """
-    Decides whether or not to recommend generated courses based on the similarity
-
-    Parameters:
-        recommended_courses (list of tuples): top 5 recommendations + their similarities to the user preferences
-    Returns:
-        response: chatbot message before showing the recommendations
-        response_end: chatbot message after showing the recommendations
-        to_recommend: indices of the recommended courses
-    """
     response = ""
     response_end = ""
     to_recommend = []
-    #print(f"***Thinking about recommending one of these: {[get_current_title(c[0]) for c in recommended_courses]}")
-    #new_rec_courses = [c for c in recommended_courses]
-    for (c, sim) in recommended_courses:
-        if sim >= 0.7:
-            to_recommend.append(c)
-            #print(f"***Good match: {get_current_title(c)} -- {sim}")
-    #print(f"\n***TO RECOMMEND: {to_recommend} (LEN: {len(to_recommend)})***\n")
-    if len(to_recommend) > 1:
-        response = "I found some courses you might like:  \n"
-        #rec_string = "\n".join([get_current_title(c[0]) for c in recommended_courses])
-        rec_string = ""
-        #for idx, c in enumerate(recommended_courses, start = 1):
-        #    rec_string += f"{idx}: {get_current_title(c[0])}  \n"
-        #response += rec_string
-        response_end += f"\nPlease tell me if these courses sound interesting to you.  \nIf you haven’t done that already, please check out the ‘Feedback Hints’ (click on the button below the chat) to find out how to properly give feedback. "
-    elif len(to_recommend) == 1:
-        #response = f"I found a course you might like:  \n- {get_current_title(to_recommend[0])}  \nFeedback would help a lot to improve further recommendations. Please tell me if this course sounds interesting or not. "
-        response = f"I found a course you might like:"
-        response_end += f"Feedback would help a lot to improve further recommendations. Please tell me if this course sounds interesting or not. "
+
+    # If there are no more courses left that could be recommended, tell the user
+    print(f"\n***recommend_courses(): len(cleaned_indices): {len(cleaned_indices)}")
+    if len(cleaned_indices) == 0:
+        response = f"There are no more courses left that I could recommend to you!"
+        response_end = ""
+        to_recommend = []
+        
+    # If there are less then the specified amount of courses left to recommend, tell the user that these are the last courses they have not yet rated or mentioned to have previously liked
+    elif len(cleaned_indices) < amount:
+        response = f"There are only {len(cleaned_indices)} courses left that I could recommend to you. These are:  \n"
+        response_end = f"You already rated all the other courses or have taken them in previous semesters! I hope I was able to help you finding new courses and that I will see you again in a few months. Have a great semester!"
+        to_recommend = cleaned_indices
+
     else:
-        response = "I need some more information to generate good recommendations for you. Could you tell me more about what kind of course you are looking for? Or is there any course you liked in the past that you didn't tell me about yet? "
-    
+        # Check if the similarity of any of the courses is above the threshold and select the corresponding response to return together with the list of courses to recommend
+        for course in cleaned_indices[amount]:
+            if float(similarities[course]) >= 0.7:
+                to_recommend.append(course)
+        if len(to_recommend) > 1:
+            response = "I found some courses you might like:  \n"
+            response_end = f"\nPlease tell me if these courses sound interesting to you.  \nIf you haven’t done that already, please check out the ‘Feedback Hints’ (click on the button below the chat) to find out how to properly give feedback. "
+        elif len(to_recommend) == 1:
+            response = f"I found a course you might like:"
+            response_end = f"Feedback would help a lot to improve further recommendations. Please tell me if this course sounds interesting or not. "
+        else:
+            response = "I need some more information to generate good recommendations for you. Could you tell me more about what kind of course you are looking for? Or is there any course you liked in the past that you didn't tell me about yet? "
+        
     return response, response_end, to_recommend

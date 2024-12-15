@@ -3,7 +3,7 @@ import numpy as np
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 import re
-from static_variables import intent_replies, module_dict
+from chatbot_variables import intent_replies, module_dict
 import string
 
 ## Handles data, recommendation generation, feedback interpretation, and user profiles
@@ -750,6 +750,7 @@ def recommend_courses(user_profile, rated_courses, previously_liked_courses, amo
 
     else:
         # Check if the similarity of any of the courses is above the threshold and select the corresponding response to return together with the list of courses to recommend
+        print(f"***recommend_courses(): Best fits: {[(get_current_title(c), float(similarities[c])) for c in cleaned_indices[:amount]]}")
         for course in cleaned_indices[:amount]:
             if float(similarities[course]) >= 0.7:
                 to_recommend.append(course)
@@ -761,5 +762,5 @@ def recommend_courses(user_profile, rated_courses, previously_liked_courses, amo
             response_end = f"Feedback would help a lot to improve further recommendations. Please tell me if this course sounds interesting or not. "
         else:
             response = "I need some more information to generate good recommendations for you. Could you tell me more about what kind of course you are looking for? Or is there any course you liked in the past that you didn't tell me about yet? "
-        print(f"***recommend_courses(): Recommending: {[(get_current_title(c), float(similarities[course])) for c in to_recommend]}")
+        print(f"***recommend_courses(): Recommending: {[(get_current_title(c), float(similarities[c])) for c in to_recommend]}")
     return response, response_end, to_recommend

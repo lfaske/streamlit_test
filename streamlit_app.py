@@ -1,7 +1,7 @@
 import streamlit as st
 from recommender import detect_intent, update_user_profile, recommend_courses, input_embedding, get_current_title, get_past_title, get_details
 import re
-from static_variables import confirmation_dict, confirmation_replies, abbreviations, hints
+from chatbot_variables import confirmation_dict, confirmation_replies, abbreviations, hints
 
 st.title("Course Recommender Bot")
 
@@ -60,7 +60,7 @@ def render_message(msg, msg_idx):
         
         # Check if there are buttons (to open details of recommended courses) to render
         if "buttons" in msg:
-            for button_data in msg["buttons"]:
+            for button_nr, button_data in enumerate(msg["buttons"], 1):
                 title = button_data["title"]
                 details = button_data["details"]
 
@@ -71,7 +71,8 @@ def render_message(msg, msg_idx):
                     st.session_state.show_details[button_key] = False
                 
                 # Create the button
-                toggle = st.button(f"➕ {title}", key=button_key)
+                #toggle = st.button(f"➕ {title}", key=button_key)
+                toggle = st.button(f"{button_nr}\. {title}", key=button_key)
                 
                 # Toggle visibility
                 if toggle:
@@ -90,7 +91,6 @@ def render_message(msg, msg_idx):
                             <div style="margin-bottom: 10px;"><strong>Lecturer:</strong> <br>{'<br>'.join(details['lecturer'])}</div>
                             <div style="margin-bottom: 10px;"><strong>Times:</strong> <br>{details['time']}</div>
                             <div style="margin-bottom: 10px;"><strong>Module assignment:</strong> <br>{'<br>'.join(details['module'])}</div>
-                            <div style="margin-bottom: 10px;"><strong>Fields of study:</strong> <br>{'<br>'.join(details['area'])}</div>
                             <div><strong>Description:</strong> <br>{details['description']}</div>
                         </div>
                     """, unsafe_allow_html=True)

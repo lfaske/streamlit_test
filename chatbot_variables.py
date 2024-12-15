@@ -42,7 +42,7 @@ intent_replies = {
     "liked_course_reference": "That's a great course! Let me find some similar courses for you...",
     "feedback": "Thank you for your feedback! I'll use it to improve recommendations.",
     "nonsense": "I'm sorry, but your message does not make sense to me. I can only understand messages in the context of recommending university courses. For more instructions click on the 'Instructions' button below the chat. Could you please rephrase your message to be more clear?",
-    "other": "I'm sorry, but I did not understand what you want to tell me. Could you please clarify?"
+    "other": "I'm sorry, but I do not understand what you want to tell me. Could you please clarify?"
 }
 
 # Title and text for the hint-button

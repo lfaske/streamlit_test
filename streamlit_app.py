@@ -189,6 +189,7 @@ if user_input := st.chat_input("Start typing ..."):
 
             # If the user referred to a liked course, add the course to the previously liked courses 
             if detected_intent == "liked_course_reference":
+                detected_courses = detected_courses[0]
                 st.session_state.user_profile['previously_liked_courses'].append(detected_courses[0])
 
                 # If the certainty (similarity of the title to the user input) is not high enough: ask if correct

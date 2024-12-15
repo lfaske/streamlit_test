@@ -147,18 +147,19 @@ def detect_intent(user_input, last_recommendations):
     intent_similarities = {'free_description': 0.0, 'liked_course_reference': 0.0, 'feedback': 0.0}
     user_embedding = model.encode([user_input])[0]
     detected_intent = "other"  # Default intent
-    chatbot_reply = ""
 
     # First check if the user has explicitly stated the intent at the beginning of the message
     if user_input.lower().startswith("free:"):
-        detected_intent = 'free_description'
-        intent_similarities['free_description'] = 1.0
+        return "free_description", intent_replies["free_description"], []
     elif user_input.lower().startswith("ref:"):
-        detected_intent = 'liked_course_reference'
-        intent_similarities['liked_course_reference'] = 1.0
+        chatbot_reply, intent_result = check_intent("liked_course_reference", user_input, user_embedding, last_recommendations)
+        if chatbot_reply != "":
+            return "liked_course_reference", chatbot_reply, intent_result
+        else:
+            return "other", "I'm sorry, but I don't understand which course you are referring to. Please make sure that the name is correct."
     elif user_input.lower().startswith("feedback:"):
-        detected_intent = 'feedback'
-        intent_similarities['feedback'] = 1.0
+        chatbot_reply, intent_result = check_intent("feedback", user_input, user_embedding, last_recommendations)
+        return "feedback", chatbot_reply, intent_result
     
     # If no intent was given, select the one which is most similar to the input
     else:
@@ -175,121 +176,170 @@ def detect_intent(user_input, last_recommendations):
         sorted_intents = dict(sorted(intent_similarities.items(), key=lambda item: item[1])[::-1])
         #print(f"***Before sorting: {intent_similarities}\n***After sorting: {sorted_intents}")
         print(f"***detect_intent(): Intent similarities: {sorted_intents}")
-        most_sim = next(iter(sorted_intents))
+        it = iter(sorted_intents.items())
+
+        for detected_intent in it:
+            #detected_intent = next(it)
+            print(f"***detect_intent(): Checking intent '{detected_intent}'!")
         
-        # If it is detected as a free description, but the probability of it being a course reference is very close, try to find a matching course first
-        ### LASSE ICH ERSTMAL WEG, DA JETZT OFT PROBLEM, DASS FREE ALS REFERENCE ERKANNT WIRD
-        #if most_sim == 'free_description' and intent_similarities['free_description'] - intent_similarities['liked_course_reference'] <= 0.05:
-        #    detected_intent = "liked_course_reference"
-        #    print("\ndetect_intent(): ***Changed intent to 'liked_course_reference'***\n")
+            # If the similarity score of the intent with the highest similarity to the input is below the threshold, return "other"
+            if detected_intent[1] < 0.5 and detected_intent[1] != "nonsense":
+                return "other", intent_replies["other"], []
+            # If it is one of the intents that just return the corresponding reply, there is no need to ckeck the, directly return
+            elif detected_intent[0] in ["greeting", "free_description", "nonsense", "other"]:
+                return detected_intent[0], intent_replies[detected_intent[0]], []
+            chatbot_reply, intent_result = check_intent(detected_intent, user_input, user_embedding, last_recommendations)
 
-        # If the similarity score of the intent with the highest similarity to the input is above the threshold, set it as the detected intent
-        # Otherwise, detect_intent is "other" as initialized above
-        if intent_similarities[most_sim] >= 0.4:
-        #elif intent_similarities[most_sim] >= 0.4:
-            detected_intent = most_sim
+            # If the chatbot reply is not empty, return the current detected intent; otherwise, the loop continues to the next intent
+            if chatbot_reply != "":
+                return detected_intent[0], chatbot_reply, intent_result
+            
+    return "other", intent_replies["other"], []
 
-    # If the intent was detected to be a reference to a previously liked course, check which course the user is referring to
-    if detected_intent == "liked_course_reference":
-        print("***detect_intent(): TITLE REFERENCE DETECTED!")
+
+
+def check_intent(detected_intent, user_input, user_embedding, last_recommendations):
+    if detected_intent[0] == "liked_course_reference":
         # First check if a title is spelled out exactly (only one reference per message allowed)
         best_fit = ("", 0.0)
         all_titles = [c['title'] for c in past_courses]
         for title in all_titles:
             ##### MAYBE EHER VARIANTE NUTZEN, DIE AUCH LEICHTE ABWANDLUNGEN (z.B. DURCH TIPPFEHLER) ERKENNT
             ####### DANN VLLT LISTE (ODER DICT MIT SIMILARITY-WERTEN) ERSTELLEN & DA ALLE TITEL, DIE ÄHNLICH GENUG SIND, DRIN SPEICHERN & AM ENDE BEST FIT RETURNEN
+            ### IST DAS ÜBERHAUPT NOTWENDIG???
             if title in user_input:
                 idx = get_past_idx(title)
                 print(f"***detect_intent(): Found EXACT Title: {title} (by index {idx}: {past_courses[idx]['title']})")
                 #detected_courses.append((title, 1.0))  ### FOR NOW ONLY 1 REFERENCED COURSE ALLOWED PER MESSAGE
-                return detected_intent, intent_replies[detected_intent], (idx, 1.0)
+                return intent_replies[detected_intent[0]], [(idx, 1.0)]
             
-        """ # NOT SURE IF THAT IS EVEN NECESSARY -> THE MORE WORDS FROM THE TITLE MATCH THE INPUT, THE MORE SIMILAR ANYWAY???            
-        # Check if any words from the input match words from the titles to weigh those courses them differently
-        possible_titles = []  # Tuples: (title, percentage of matched words)
-        ### LEMMATIZE!!! -> remove stopwords & auch Worte wie 'I', 'like', 'liked', 'course', ... 
-        ###### (auch für similarity unten; maybe dann auch bei Titeln entfernen)
-        ### MAYBE AUCH SPEICHERN, WIE VIELE WÖRTER (BZW VLLT BESSER WORTANTEIL (GEFUNDENE WÖRTER/WÖRTER IN TITEL)) 
-        ###### -> JE MEHR WÖRTER VOM TITEL ENTHALTEN SIND, UMSO WAHRSCHEINLICHER IST DER KURS GEMEINT
-        ###### -> für similarity dann vllt: sim = (sim+Wortanteil)/2 ## SCHAUEN, WIE GUT DAS FUNKTIONIERT (ODER OB ES SIM EHER VERKLEINERT)
-        #split_input = re.sub(r'[^\w\s]', '', user_input).lower().split()
-        split_input = user_input.lower().split()
-        split_input = [word.translate(str.maketrans('', '', string.punctuation)) for word in split_input]
-        split_titles = {t: t.lower().translate(str.maketrans('', '', string.punctuation)).split() for t in all_titles}
-        #split_titles = {t: t.lower().split() for t in all_titles}
-        for title, t in split_titles.items():
-            matched_words = 0
-            for word in split_input:
-                if word in t:
-                    matched_words += 1
-            if matched_words > 0:
-                match_percentage = matched_words/len(t)
-                possible_titles.append((title, match_percentage))
-                print(f"\n***detect_intent(): matching title '{title}' (split: {t}; len of t: {len(t)})")
-                print(f"***detect_intent(): -> matched words = {matched_words} -> percentage = {match_percentage}")
-        print(f"***detect_intent(): --> matched titles: {possible_titles}")"""
-        #print(f"POSSIBLE TITLES: {possible_titles}")
         
         # Substract the difference between the similarity of liked course references and free description from the threshold  ### OR BETTER JUST SIM OF REFERENCE??
         # -> the more certain it is to be a reference, the lower is the threshold for the title similarity
-        title_threshold = 0.55 - (intent_similarities['liked_course_reference'] - intent_similarities['free_description'])
-        print(f"***detect_intent(): Title threshold = {title_threshold}")
+        ### NICHT SICHER, OB DAS WIRKLICH GUT IST (WEGEN NONSENSE)
+        #title_threshold = 0.55 - (intent_similarities['liked_course_reference'] - intent_similarities['free_description'])
+        #print(f"***detect_intent(): Title threshold = {title_threshold}")
+
+        # Set the threshold lower if the similarity for the intent was set to 1.0
+        if detected_intent[1] >= 1.0:
+            title_threshold = 0.2
+        else:
+            title_threshold = 0.5
 
         # Check if the input is similar enough to any of the titles
-        #print("Checking similarities of titles...")
-        ##### WORTANTEIL VON OBEN MIT EINBERECHNEN #### ÜBERHAUPT USEFUL?????? -> JE MEHR WÖRTER GLEICH SIND, UMSO MORE SIMILAR MÜSSTE ES EH SEIN???
         for title, title_emb in title_embeddings.items():  ### KANN ICH SONST AUCH ÜBER INDEX MACHEN -> BRAUCHE DANN TITLE NICHT MEHR IN TITLE_EMBEDDINGS -> IST DANN NUR NOCH LIST STATT DICT
             title_sim = cosine_similarity([user_embedding], [title_emb])
             #print(f"{title}: {title_sim}")
-            # If a part of the title was detected in user input, set the threshold lower
-            """if title in possible_titles and title_sim > 0.4 and title_sim > best_fit[1]:
-                #detected_courses.append((title, title_sim))   #### FOR NOW ONLY 1 REFERENCED COURSE ALLOWED PER MESSAGE
-                idx = get_past_idx(title)
-                print(f"***detect_intent(): Found PARTIALLY SIMILAR Title: {(title, title_sim)} -- Title by idx: {get_past_title(idx)}")
-                best_fit = (idx, title_sim)"""
-            
+
             ## JUST TESTING 
             if title_sim > 0.3:
                 print(f"***detect_intent(): Title similarity of '{title}': {title_sim}")
                 
-            #elif title_sim > 0.6 and title_sim > best_fit[1]:  # Higher threshold for titles of which no part has been detected
             # If the similarity score of the title is above the threshold and higher than the currently highest one, save the courses index and the score as best fit
             if title_sim > title_threshold and title_sim > best_fit[1]:
-                #detected_courses.append((title, title_sim))   #### FOR NOW ONLY 1 REFERENCED COURSE ALLOWED PER MESSAGE
                 idx = get_past_idx(title)
                 print(f"***detect_intent(): Found SIMILAR Title: {(title, title_sim)} -- Title by idx: {get_past_title(idx)}")
                 best_fit = (idx, title_sim)
                 
         # Return the best fitting title, if any was found with a similarity above the threshold (otherwise, best_fit is ('other', 0.0))
-        if best_fit[1] > 0.0:
-            return detected_intent, intent_replies[detected_intent], best_fit
+        if best_fit[1] > title_threshold:
+            return intent_replies[detected_intent[0]], [best_fit]
         # Otherwise change the intent to free_description
-        else:  ### MAYBE BESSER: VERSUCHE NÄCHST HÖCHSTEN INTENT?!? -> DAFÜR AUSFÜHRUNG DER INTENTS ALS EIGENE FUNKTIONEN (& Liste mit similarities übergeben; + default-intent, der aufgerufen wird, wenn Liste leer)?!?
-            detected_intent = "free_description"
-
-    elif detected_intent == "feedback":
-        print("***detect_intent(): FEEDBACK DETECTED!")
+        else: 
+            return "", []
+        
+    elif detected_intent[0] == "feedback":
         c_feedback = give_feedback(user_input, last_recommendations)
         if len(c_feedback) > 0:
-            chatbot_reply += "You gave the following feedback:\n" #### NOT SURE OB ICH DAS DRIN LASSE ODER NUR ZUM TESTEN
+            chatbot_reply = "You gave the following feedback:\n" #### NOT SURE OB ICH DAS DRIN LASSE ODER NUR ZUM TESTEN
             for (c, f) in c_feedback:
                 chatbot_reply += f"- {current_courses[c]['title']}: {f}\n"
-                #### HIER AUCH USER_PROFILE UPDATEN??? MÜSSTE DAFÜR USER_PROFILE VON CHATBOT AN DIESE FUNKTION ÜBERGEBEN & WIEDER ZURÜCKGEBEN
-            chatbot_reply += "\n"
-            return detected_intent, chatbot_reply, c_feedback
+                chatbot_reply += "\n"
+            return chatbot_reply, c_feedback
         else:
             #### MAYBE: IF SIMILARITY ZU FEEDBACK ÜBER BESTIMMTEN THRESHOLD: NACHRICHT AUSGEBEN, DASS ERKANNT WURDE, DASS USER FEEDBACK GEBEN WILL, ABER NICHT ERKANNT WURDE, FÜR WELCHE(N) KURS(E) BZW SENTIMENT -> KURZE BESCHREIBUNG VON FEEDBACK-FORMAT & WEITER STATUS == FEEDBACK
             ############ & FALLS UNTER THRESHOLD: NÄCHST-HÖCHSTEN INTENT VERSUCHEN
-            chatbot_reply += "I think you wanted to give feedback to one or more of the recommendated courses, but I could not clearly understand you. Please click on the button 'Feedback Hint' below the chat to find out how to properly give feedback."
-            return detected_intent, chatbot_reply, []
+            chatbot_reply = "I think you wanted to give feedback to one or more of the recommendated courses, but I could not clearly understand you. Please click on the button 'Feedback Hint' below the chat to find out how to properly give feedback."
+            return chatbot_reply, []
 
             #detected_intent, intent_replies[detected_intent], []
 
-              
-    #if detected_intent in intent_replies.keys(): ### SHOULD NOT BE NECESSARY?!?!
-    return detected_intent, intent_replies[detected_intent], []
 
 
+def next_intent(intent_similarities, last_intent):
+    """
+    Finds the intent with next highest similarity to the input
+
+    Parameters:
+        intent_similarities (dict): dictionary containing the intents sorted by their similarity to the input
+        last_intent (str): the last checked intent
+    Returns:
+        the next most similar intent after the last intent
+    """
+    # Get the list of intents (sorted by similarity)
+    intents = list(intent_similarities.keys())
+    
+    # Get the index of the last intent
+    index = intents.index(last_intent)
+    
+    # Check if there's a next entry
+    if index + 1 < len(intents):
+        next_intent = intents[index + 1]
+        return next_intent
+    else:
+        return 'other'
+
+
+def course_reference(user_input, user_embedding):
+    """
+    Tries to find the referenced course. If no fitting title is found, it calls the next highest intent
+    """
+    # First check if a title is spelled out exactly (only one reference per message allowed)
+    best_fit = ("", 0.0)
+    all_titles = [c['title'] for c in past_courses]
+    for title in all_titles:
+        ##### MAYBE EHER VARIANTE NUTZEN, DIE AUCH LEICHTE ABWANDLUNGEN (z.B. DURCH TIPPFEHLER) ERKENNT
+        ####### DANN VLLT LISTE (ODER DICT MIT SIMILARITY-WERTEN) ERSTELLEN & DA ALLE TITEL, DIE ÄHNLICH GENUG SIND, DRIN SPEICHERN & AM ENDE BEST FIT RETURNEN
+        ### IST DAS ÜBERHAUPT NOTWENDIG???
+        if title in user_input:
+            idx = get_past_idx(title)
+            print(f"***detect_intent(): Found EXACT Title: {title} (by index {idx}: {past_courses[idx]['title']})")
+            #detected_courses.append((title, 1.0))  ### FOR NOW ONLY 1 REFERENCED COURSE ALLOWED PER MESSAGE
+            return detected_intent, intent_replies[detected_intent], (idx, 1.0)
+        
+    
+    # Substract the difference between the similarity of liked course references and free description from the threshold  ### OR BETTER JUST SIM OF REFERENCE??
+    # -> the more certain it is to be a reference, the lower is the threshold for the title similarity
+    ### NICHT SICHER, OB DAS WIRKLICH GUT IST (WEGEN NONSENSE)
+    #title_threshold = 0.55 - (intent_similarities['liked_course_reference'] - intent_similarities['free_description'])
+    #print(f"***detect_intent(): Title threshold = {title_threshold}")
+    title_threshold = 0.5
+
+    # Check if the input is similar enough to any of the titles
+    for title, title_emb in title_embeddings.items():  ### KANN ICH SONST AUCH ÜBER INDEX MACHEN -> BRAUCHE DANN TITLE NICHT MEHR IN TITLE_EMBEDDINGS -> IST DANN NUR NOCH LIST STATT DICT
+        title_sim = cosine_similarity([user_embedding], [title_emb])
+        #print(f"{title}: {title_sim}")
+        # If a part of the title was detected in user input, set the threshold lower
+        
+        ## JUST TESTING 
+        if title_sim > 0.3:
+            print(f"***detect_intent(): Title similarity of '{title}': {title_sim}")
+            
+        # If the similarity score of the title is above the threshold and higher than the currently highest one, save the courses index and the score as best fit
+        if title_sim > title_threshold and title_sim > best_fit[1]:
+            idx = get_past_idx(title)
+            print(f"***detect_intent(): Found SIMILAR Title: {(title, title_sim)} -- Title by idx: {get_past_title(idx)}")
+            best_fit = (idx, title_sim)
+            
+    # Return the best fitting title, if any was found with a similarity above the threshold (otherwise, best_fit is ('other', 0.0))
+    if best_fit[1] > title_threshold:
+        return detected_intent, intent_replies[detected_intent], best_fit
+    # Otherwise change the intent to free_description
+    else:  ### MAYBE BESSER: VERSUCHE NÄCHST HÖCHSTEN INTENT?!? -> DAFÜR AUSFÜHRUNG DER INTENTS ALS EIGENE FUNKTIONEN (& Liste mit similarities übergeben; + default-intent, der aufgerufen wird, wenn Liste leer)?!?
+        # Get the next highest intent
+        
+        
+        detected_intent = "free_description"
 
 ###--- Handle Feedback ---###
 

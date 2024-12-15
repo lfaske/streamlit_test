@@ -3,13 +3,14 @@ from recommender import detect_intent, update_user_profile, recommend_courses, i
 import re
 from static_variables import confirmation_dict, confirmation_replies, abbreviations, hints
 
-st.title("Test Chat")
+st.title("Course Recommender Bot")
 
 
 ###--- Initialize session_state variables ---###
 
 # Initialize the chat history with a welcome message from the chatbot
-welcome_msg = "Hey, nice to meet you!  \nI'm here for helping you find interesting courses for your next semester. Just name a course you liked in the past or describe what kind of course you're looking for. For more instructions, click on the button below."
+welcome_msg = "Hey, nice to meet you!  \nI'm CouRe, a chatbot designed to help you find interesting courses for the upcoming semester. You can start by either naming a course you liked in the past or describe what kind of course you are looking for. For more detailed instructions, click on the button below."
+#here for helping you find interesting courses for your next semester. Just name a course you liked in the past or describe what kind of course you're looking for. For more instructions, click on the button below."
 if "messages" not in st.session_state:
     st.session_state.messages = [{"role": "assistant", "content": welcome_msg, "content_end": "", "new_recommendations": []}]
 
@@ -80,9 +81,17 @@ def render_message(msg, msg_idx):
                 if st.session_state.show_details[button_key]:
                     st.markdown(f"""
                         <div style="border: 1px solid #ddd; padding: 10px; margin: 10px 0; border-radius: 5px;">
-                            <strong>Description:</strong> {details['description']}<br>
+                            <strong>Course type:</strong> {details['status']}<br>
+                            <strong>Mode:</strong> {details['mode']}<br>
+                            <strong>Language:</strong> {details['language']}<br>
                             <strong>ECTS:</strong> {details['ects']}<br>
-                            <strong>Lecturer:</strong> {', '.join(details['lecturer'])}
+                            <div style="margin-bottom: 10px;"><strong>SWS:</strong> {details['sws']}</div>
+                            <div style="margin-bottom: 10px;"><strong>Prerequisites:</strong> <br>{details['prerequisites']}</div>
+                            <div style="margin-bottom: 10px;"><strong>Lecturer:</strong> <br>{'<br>'.join(details['lecturer'])}</div>
+                            <div style="margin-bottom: 10px;"><strong>Times:</strong> <br>{details['time']}</div>
+                            <div style="margin-bottom: 10px;"><strong>Module assignment:</strong> <br>{'<br>'.join(details['module'])}</div>
+                            <div style="margin-bottom: 10px;"><strong>Fields of study:</strong> <br>{'<br>'.join(details['area'])}</div>
+                            <div><strong>Description:</strong> <br>{details['description']}</div>
                         </div>
                     """, unsafe_allow_html=True)
         # Display assistant's text

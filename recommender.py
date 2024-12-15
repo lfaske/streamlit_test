@@ -348,12 +348,12 @@ def sentence_sentiment(sentence):
     Parameters:
         sentence (str): sentence to check the sentiment of
     Returns:
-        'liked' or 'disliked'
+        'liked', 'disliked' or 'negation', or None if no sentiment was found
     """
     sentiment_dict = {
         "liked": ["liked", "like", "love", "interesting", "good", "awesome", "nice", "great"],
         "disliked": ["dislike", "hate", "boring", "bad"],
-        "negative": ["not", "don't", "didn't", "doesn't", "aren't", "isn't"]
+        "negation": ["not", "don't", "didn't", "doesn't", "aren't", "isn't"]
     }
     # Reverse the dictionary for a more efficient lookup
     sentiment_key = {word: key for key, values in sentiment_dict.items() for word in values}
@@ -362,13 +362,12 @@ def sentence_sentiment(sentence):
     split_feedback = re.sub(r"[^\w\s']", '', sentence).lower().split()
     matches = list(set([sentiment_key[word] for word in split_feedback if word in sentiment_key]))
 
-    # If exactly one sentiment is found (which is either 'liked' or 'disliked'), return it
-    #if len(matches) == 1 and matches[0] != 'negative':
-    if len(matches) == 1 and matches[0]: ### ALLOW NEGATIVE: IF SENTIMENT IN PREVIOUS SENTENCE: USE OPPOSITE
+    # If exactly one sentiment is found, return it
+    if len(matches) == 1 and matches[0]:
         return matches[0]
-    # If only 'negative' and 'liked' are found (e.g., "I don't like course 1"), return 'disliked'
+    # If only 'negation' and 'liked' are found (e.g., "I don't like course 1"), return 'disliked'
     # Not the other way around, because phrases like "I don't hate it" don't necessarily mean that it's liked
-    elif len(matches) == 2 and 'negative' in matches and 'liked' in matches:
+    elif len(matches) == 2 and 'negation' in matches and 'liked' in matches:
         return 'disliked'
     print(f"\n\n?!?sentence_sentiment(): Found {len(matches)} matches: {matches}\n\n")
     return None
@@ -387,7 +386,10 @@ def give_feedback(user_input, last_recommendations):
     if len(last_recommendations) == 1:
         print(f"***give_feedback(): Only one recommendation: {last_recommendations[0]}")
         sentiment = sentence_sentiment(user_input)
-        return [(last_recommendations[0], sentiment)]
+        if sentiment is None:
+            return[]
+        else:
+            return [(last_recommendations[0], sentiment)]
 
     # #### BERÜCKSICHTIGEN, OB PUNKT SATZENDE IST ODER ZUR NUMMERIERUNG GEHÖRT (z.B. "I liked the 1. and 2. course")
     # Split the input into parts separated by 'but'
@@ -422,20 +424,25 @@ def give_feedback(user_input, last_recommendations):
     #print("SENTENCES:", sentences)
     for s in sentences:
         courses = find_feedback_courses(s)
-        c_sentiment = sentence_sentiment(s)
         # If no course was found, skip the sentence
         if len(courses) == 0:  
             continue
+        
+        c_sentiment = sentence_sentiment(s)
 
-        # If the sentiment is 'negative', use the opposite of the previous sentence's sentiment (if any)
-        if c_sentiment == 'negative' and len(given_feedback) > 0:
+        # If no sentiment was found, skip the sentence
+        if c_sentiment is None:
+            continue
+
+        # If the sentiment is 'negation', use the opposite of the previous sentence's sentiment (if any)
+        if c_sentiment == 'negation' and len(given_feedback) > 0:
             print(f"***give_feedback(): Found feedback {c_sentiment} in sentence {s}!")
             c_sentiment = given_feedback[-1][1]
             print(f"*** -> Sentiment of last sentence: {given_feedback[-1][1]}")
             c_sentiment = 'liked' if given_feedback[-1][1] == 'disliked' else 'disliked'
             print(f"*** -> Sentiment of current sentence changed to {c_sentiment}")
-        # If it is negative but there have not yet been sentences with a detected sentiment, skip the sentence
-        elif c_sentiment == 'negative':  
+        # If it is negation but there have not yet been sentences with a detected sentiment, skip the sentence
+        elif c_sentiment == 'negation':  
             continue
 
         # If the user gave feedback for all courses simultaneously, set all courses to the sentiment
@@ -748,11 +755,11 @@ def recommend_courses(user_profile, rated_courses, previously_liked_courses, amo
                 to_recommend.append(course)
         if len(to_recommend) > 1:
             response = "I found some courses you might like:  \n"
-            response_end = f"\nPlease tell me if these courses sound interesting to you.  \nIf you haven’t done that already, please check out the ‘Feedback Hints’ (click on the button below the chat) to find out how to properly give feedback. "
+            response_end = f"To get more information about a course, you can click on its title in the list.  \n\nPlease tell me if these courses sound interesting to you.  \nIf you haven’t done that already, please check out the ‘Feedback Hints’ (click on the button below the chat) to find out how to properly give feedback. "
         elif len(to_recommend) == 1:
             response = f"I found a course you might like:"
             response_end = f"Feedback would help a lot to improve further recommendations. Please tell me if this course sounds interesting or not. "
         else:
             response = "I need some more information to generate good recommendations for you. Could you tell me more about what kind of course you are looking for? Or is there any course you liked in the past that you didn't tell me about yet? "
-        
+        print(f"***recommend_courses(): Recommending: {[(get_current_title(c), float(similarities[course])) for c in to_recommend]}")
     return response, response_end, to_recommend

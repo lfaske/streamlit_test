@@ -197,7 +197,6 @@ def detect_intent(user_input, last_recommendations):
     return "other", intent_replies["other"], []
 
 
-
 def check_intent(detected_intent, user_input, user_embedding, last_recommendations):
     if detected_intent[0] == "liked_course_reference":
         # First check if a title is spelled out exactly (only one reference per message allowed)
@@ -550,7 +549,7 @@ def update_user_profile(user_profile, input_embedding = None, rated_course = Non
     return user_profile
 
 
-###--- Recommendation Generation ---###
+###--- Filter Management ---###
 
 def find_modules(user_input):
     """
@@ -621,39 +620,21 @@ def find_modules(user_input):
     print(f"***find_modules(): found modules: {modules}")
     return modules
     
-
-def input_soup(user_input):
+def find_attributes(user_input, relevant_attributes):
     """
-    Creates a soup from the user input that has the same scheme as the course-soups for better comparison
+    Extracts all attributes from the input
 
-    Parameter:
-        user_input (str): the user's input that should be transformed into a soup
+    Parameters:
+        user_input (str): the user's input that should be checked for attributes
     Returns:
-        user_soup
+        dictionary with all found attributes and their values
     """
-    print(f"\n\n***input_soup(): START CREATING SOUP")
-    # Attributes that are relevant for the soup, except from title and description
-    soup_attributes = ['status', 'mode', 'ects', 'sws', 'lecturer_short', 'module', 'area']
+    #relevant_attributes = ['status', 'mode', 'ects', 'sws', 'lecturer_short', 'module', 'area', 'language', 'time']
 
     # Get a dictionary containing all possible values for each attribute that is relevant for the soup
-    #check_attr = {a: list(v) for a, v in all_attr.items() if a in [attr.lower() for attr in soup_attributes]}
-    check_attr = {a: v for a, v in current_attributes.items() if a in soup_attributes} ### VON current_attr (da nur mit current_courses verglichen) ODER BESSER BEIDEN (da es auch Werte geben kann, die es in früheren Semestern gab, aber jetzt nicht mehr)???
-    #print(f"***input_soup(): all values for 'sws': {check_attr['sws']}")
-    #print(f"all_attr: {all_attr}\ncheck_attr: {check_attr}")
-    #print(f"***input_soup(): all attributes to check: {check_attr.keys()}")
-
-    # Extract the relevant attributes from the input
+    check_attr = {a: v for a, v in current_attributes.items() if a in relevant_attributes} ### VON current_attr (da nur mit current_courses verglichen) ODER BESSER BEIDEN (da es auch Werte geben kann, die es in früheren Semestern gab, aber jetzt nicht mehr)???
     found_attr = {key: "" for key in check_attr}
-    #print(f"***input_soup(): found_attr: {found_attr}")
 
-    """for attr, val in check_attr.items():
-        if attr in user_input.lower():
-            print(f"Found ATTRIBUTE '{attr}' in input!")
-
-        else:
-            for v in val:
-                if v.lower() in user_input.lower():
-                    print(f"Found VALUE '{v}' (for attr '{attr}') in input!")"""
     for attr, val in check_attr.items():
         #print(f"***input_soup(): checking attr '{attr}'")
         if attr == 'module':
@@ -712,22 +693,33 @@ def input_soup(user_input):
                 else:
                     if not str(v) in found_attr[attr_key]:
                         found_attr[attr_key] += str(v)
-                        #print(f"***input_soup(): attribut '{attr_key}': {found_attr[attr_key]}")
- 
-        #print(f"\nLooking at attribute {attr}...")
-        #if attr in user_input.lower():  ##### BRINGT DAS ÜBERHAUPT WAS?????
-            #print(f"***input_soup(): Found ATTRIBUTE '{attr}' in input!")
-            # If the attribute hasn't been found already, look for its value
-            #if found_attr[attr] == "":
-                #print(f"***input_soup(): -> It's new!")
-                ### Can't just look for exact values in input, as those would have been found before
-                ### MAYBE JE NACH ATTRIBUT UNTERSCHIEDLICHE WÖRTER (Z.B. 'ARTIFICIAL INTELLIGENCE' ETC.) SUCHEN???
-                ### ODER HIER NACH ALTERNATIV-BEZEICHNUNGEN/TRANSLATIONS SUCHEN (IN EIGENEM DICT)
-            #else:
-                #print(f"***input_soup(): -> Already found '{attr}' -> skipping!")
+    return found_attr
+
+def set_filters(user_input):
+    filter_attributes = ['status', 'mode', 'ects', 'sws', 'lecturer_short', 'module', 'area', 'language', 'time']
+    found_attr = find_attributes(user_input, filter_attributes)
+    filter_dict = {attr: val for attr, val in found_attr.items() if val != ""}
+    print(f"***set_filters(): filter_dict: {filter_dict}")
+    return filter_dict
 
 
-    # Create soup  ##### MAYBE REMOVE FOUND ATTRIBUTES FROM INPUT AND ONLY PUT REST OF INPUT IN DESCRIPTION???
+
+###--- Recommendation Generation ---###
+def input_soup(user_input):
+    """
+    Creates a soup from the user input that has the same scheme as the course-soups for better comparison
+
+    Parameter:
+        user_input (str): the user's input that should be transformed into a soup
+    Returns:
+        user_soup
+    """
+    print(f"\n\n***input_soup(): START CREATING SOUP")
+    # Attributes that are relevant for the soup, except from title and description
+    soup_attributes = ['status', 'mode', 'ects', 'sws', 'lecturer_short', 'module', 'area']
+    found_attr = find_attributes(user_input, soup_attributes)
+    
+    # Create soup  ##### MAYBE REMOVE FOUND ATTRIBUTES FROM INPUT AND ONLY PUT REST OF INPUT IN DESCRIPTION??? AT LEAST FOR ECTS, SWS & LECTURER
     soup = f"Title: . Description: {user_input}. Status: {found_attr['status']}. Mode: {found_attr['mode']}. ECTS: {found_attr['ects']}. SWS: {found_attr['sws']}. Lecturer: {found_attr['lecturer_short']}. Module: {found_attr['module']}. Area: {found_attr['area']}."
     print(f"\n***input_soup(): FINAL found_attr: {found_attr}\n***input_soup(): Soup: '{soup}'")
     return soup
@@ -742,13 +734,23 @@ def input_embedding(user_input):
         Returns:
             input_emb: the embedding of the input
     """
+    relevant_attributes = ['status', 'mode', 'ects', 'sws', 'lecturer_short', 'module', 'area', 'language', 'time']
+    found_attr = find_attributes(user_input, relevant_attributes)
+
+    # Get the attributes to set filters for
+    filter_dict = {attr: val for attr, val in found_attr.items() if val != ""}
+    print(f"***set_filters(): filter_dict: {filter_dict}")
+
     # Get input in soup-format
-    soup = input_soup(user_input)
+    soup = f"Title: . Description: {user_input}. Status: {found_attr['status']}. Mode: {found_attr['mode']}. ECTS: {found_attr['ects']}. SWS: {found_attr['sws']}. Lecturer: {found_attr['lecturer_short']}. Module: {found_attr['module']}. Area: {found_attr['area']}."
+    print(f"\n***input_soup(): FINAL found_attr: {found_attr}\n***input_soup(): Soup: '{soup}'")
+
+    #soup = input_soup(user_input)
     input_emb = model.encode([soup])[0]
-    return input_emb
+    return input_emb, filter_dict
 
 
-def recommend_courses(user_profile, rated_courses, previously_liked_courses, amount=5, filter=None):
+def recommend_courses(user_profile, rated_courses, previously_liked_courses, amount=5, filter_dict={}):
     """
     Generates recommendations based on a user's preferences.
 
@@ -757,7 +759,7 @@ def recommend_courses(user_profile, rated_courses, previously_liked_courses, amo
             rated_courses (list): indices of courses (in current_courses) the user has already rated
             previously_liked_courses (list): courses the user has stated to have liked (from past semesters)
             amount (int): how many courses should be recommended - default: top 5
-            filter (dict): all selected filters (IF IMPLEMENTED)
+            filter (dict): all selected filters
         Returns: 
             response: chatbot message before showing the recommendations
             response_end: chatbot message after showing the recommendations
@@ -799,6 +801,12 @@ def recommend_courses(user_profile, rated_courses, previously_liked_courses, amo
         to_recommend = cleaned_indices
 
     else:
+        # Delete all courses that do not match the selected filters
+        #if len(filter_dict) > 0:
+            
+
+
+
         # Check if the similarity of any of the courses is above the threshold and select the corresponding response to return together with the list of courses to recommend
         print(f"***recommend_courses(): Best fits: {[(get_current_title(c), float(similarities[c])) for c in cleaned_indices[:amount]]}")
         for course in cleaned_indices[:amount]:

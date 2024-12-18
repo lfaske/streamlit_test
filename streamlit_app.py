@@ -24,7 +24,8 @@ if "user_profile" not in st.session_state:
         'preferences': None,
         'previously_liked_courses': [],
         'rated_courses': [],
-        'last_recommendations': []
+        'last_recommendations': [],
+        'set_attributes': {}
     }
 
 # Initialize the instruction/hint buttons
@@ -119,7 +120,8 @@ if user_input := st.chat_input("Start typing ..."):
             'preferences': None,
             'previously_liked_courses': [],
             'rated_courses': [],
-            'last_recommendations': []
+            'last_recommendations': [],
+            'set_attributes': {}
             }
         st.session_state.hint_button = {
             'show_instructions': False,
@@ -208,7 +210,7 @@ if user_input := st.chat_input("Start typing ..."):
 
             # If the user gave a description, update their profile and generate new recommendations 
             elif detected_intent == "free_description":
-                input_emb = input_embedding(user_input)  # Compute the embedding of the user's input
+                input_emb, filter_dict = input_embedding(user_input)  # Compute the embedding of the user's input and get the mentioned attributes for the filter
 
                 # Update the user profile and generate recommendations
                 st.session_state.user_profile['preferences'] = update_user_profile(user_profile=st.session_state.user_profile['preferences'], input_embedding=input_emb, liked=True)

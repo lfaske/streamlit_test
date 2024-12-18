@@ -130,7 +130,8 @@ def get_details(idx):
     """
     return current_courses[idx]
 
-# Define the intent detection function
+###--- Handle Intent Detection ---###
+
 def detect_intent(user_input, last_recommendations):
     """
     Detects the intent of a user's input
@@ -262,7 +263,6 @@ def check_intent(detected_intent, user_input, user_embedding, last_recommendatio
             return chatbot_reply, []
 
             #detected_intent, intent_replies[detected_intent], []
-
 
 
 def next_intent(intent_similarities, last_intent):
@@ -551,17 +551,339 @@ def update_user_profile(user_profile, input_embedding = None, rated_course = Non
 
 ###--- Filter Management ---###
 
-def find_modules(user_input):
+####################################################
+##### SETTING FILTERS FROM FREE DESCRIPTIONS #######
+def find_sws_ects(user_input, old_filter):
+    print("===============================\nChecking SWS and ECTS in input...")
+    #sws_ects_pattern = r"(?:\b|\s|\.)(\d\ssws|\d\sects)"
+    old_sws_ects_pattern = r"""
+        (?:\b|\s\.)
+        (
+            (\d+)                           # First sws/ects of range
+            (?:\sto\s|\-|\s\-\s|\sand\s)    # Range indicator
+            (\d+\ssws|\d+\sects)            # Last sws/ects of range (with indicator)
+        |
+            (\d+\ssws|\d+\sects)            # Single mention
+        )
+        """
+    sws_ects_pattern = r"""
+        (?:\b|\s\.)
+        (
+            (\d+)                           # First sws/ects of range
+            (?:\sto\s|\-|\s\-\s|\sand\s)    # Range indicator
+            (\d+\s?sws|\d+\s?ects)          # Last sws/ects of range (with indicator)
+        |
+            (\d+\s?sws|\d+\s?ects)          # Single mention
+        )
+        """
+    # Get all mentioned SWS and ECTS from the input
+    matches = re.findall(sws_ects_pattern, user_input, re.VERBOSE | re.IGNORECASE)
+    found_matches = [m[0] for m in matches]
+    #print(f"-> SWS/ECTS mentioned in input: {found_matches}\n({matches})")
+    cleaned_input = user_input
+
+    found_sws = []
+    found_ects = []
+    
+    for match in found_matches:
+        #print(f"Checking {match}...")
+        # Remove SWS and ECTS from input to avoid misinterpreting them as times
+        cleaned_input = cleaned_input.replace(match, "")
+        # Extract the attribute and number(s) from the match
+        attr = re.search(r'(ects|sws)', match, flags = re.IGNORECASE).group().strip().lower()
+        numbers = [int(nr) for nr in re.findall(r'\d+', match)]
+        # Check for ranges
+        if any(range_indicator in match for range_indicator in ['and', '-', 'to']):
+            numbers = list(range(numbers[0], numbers[1]+1))
+            #print(f"~~> Found range: {numbers}")
+        if attr == 'sws':
+            found_sws += numbers
+        elif attr == 'ects':
+            found_ects += numbers
+        else:
+            print(f"-x-x-x-x- {attr} is neither sws nor ects??!!")
+        #print(f"~~> Found: {attr} -- {numbers}")
+
+    # Combine them with previously set filters
+    #found_sws += old_filter
+    found_sws += old_filter['sws']
+    found_ects += old_filter['ects']
+
+    # Remove duplicates and sort the lists
+    found_sws = sorted(list(set(found_sws)))
+    found_ects = sorted(list(set(found_ects)))
+    print(f"Found SWS: {found_sws}\nFound ECTS: {found_ects}\nCleaned input: {cleaned_input}")
+    return found_sws, found_ects, cleaned_input
+
+def input_times(user_input, old_filter):
+    print("===============================\nChecking days and times in input...")
+    #print("Checking days in input...")
+    weekdays = {'monday': 'Mon.', 'tuesday': 'Tue.', 'wednesday': 'Wed.', 'thursday': 'Thu.', 'friday': 'Fri.', 'saturday': 'Sat.',
+                'every day': 'alldays', 'each day': 'alldays', 'any day': 'alldays', 'all days': 'alldays', 'everyday': 'alldays', 'every single day': 'alldays', 
+                'other\sday': 'otherdays', 'other\sdays': 'otherdays', 'remaining days': 'otherdays'}
+    all_weekdays = ['Mon.', 'Tue.', 'Wed.', 'Thu.', 'Fri.', 'Sat.']
+    
+    # Regex pattern to match weekdays (multiple days / ranges as well as individual days)
+    #### KLAPPT DAS SO AUCH FÜR AUFLISTUNG VON TAGEN??? z.B. "On mondays, tuesdays and fridays..."
+    abbrev_weekdays_pattern = r"""
+        (?:\b|\s)
+        (
+            (from\s|between\s)? 
+            (Mon\.|Tue\.|Wed\.|Thu\.|Fri\.|Sat\.)          # First day of range
+            (\sto\s|\-|\s\-\s|\sor\s|\sand\s)                              # Range indicator
+            (Mon\.|Tue\.|Wed\.|Thu\.|Fri\.|Sat\.)        # End time
+        |
+            (Mon\.|Tue\.|Wed\.|Thu\.|Fri\.|Sat\.|alldays|otherdays)         # Single day
+        )
+        """
+    
+    found_days = []  # List to store all found days
+    found_day_time = {}  # days as keys, corresponding times as values
+
+    # Replace full weekdays with abbreviations
+    for full_day, abbrev in weekdays.items():
+        user_input = re.sub(rf'\b{full_day}s?\b', abbrev, user_input, flags=re.IGNORECASE)
+    #print(f"DAYS Changed input to: {user_input}\n")
+    matches = re.findall(abbrev_weekdays_pattern, user_input, re.VERBOSE | re.IGNORECASE)
+    found_days = [m[0] for m in matches]
+    print(f"-> Days mentioned in input: {found_days}")
+
+        
+    ################################################################
+    ##### T I M E S
+    ################################################################
+
+    # Get all times from input
+    #print("\n-----\nChecking times in input...")
+
+    # Add a mapping for textual numbers to digits
+    textual_time_map = {
+        "one": "1", "two": "2", "three": "3", "four": "4", "five": "5", 
+        "six": "6", "seven": "7", "eight": "8", "nine": "9", "ten": "10", 
+        "eleven": "11", "twelve": "12"
+    }
+
+    # Define regex pattern for times
+    time_pattern = r"""
+        \b
+        (
+            (?:at\s|from\s|between\s)?                                                              # Optional range indicator at start
+            (half\spast\s|quarter\sto\s|quarter\spast\s)?                                           # Optional time modifiers
+            ([1-9]|1[0-9]|2[0-3])(:[0-5][0-9])?                                                     # Starting time
+            ((\s|\.|\b)?(?:o'clock\s)?(?:in\s)?(?:the\s)?(morning|afternoon|evening|AM|PM|am|pm)?)  # Optional modifiers
+            (\sto\s|\sand\s|\sand\send\sat\s|\suntil\s|\-|\s\-\s)                                   # Range indicator
+            (half\spast\s|quarter\sto\s|quarter\spast\s)?                                           # Optional time modifiers
+            (([1-9]|1[0-2]|2[0-3])(:[0-5][0-9])?)                                                   # End time
+            ((\s|\.|\b)?(?:o'clock\s)?(?:in\s)?(?:the\s)?(morning|afternoon|evening|AM|PM|am|pm)?)  # Optional modifiers
+        |
+            (at\s|half\spast\s|quarter\sto\s|quarter\spast\s)?  # Optional time indicators
+            ([1-9]|1[0-9]|2[0-3])(:[0-5][0-9])?                 # Hours and optional minutes
+            (\s|\.|\b)?                                         # Optional space, period, or word boundary
+            (?:o'clock\s)?                                      # Optional "o'clock"
+            (?:in\s)?                                           # Optional "in"
+            (?:the\s)?                                          # Optional "the"
+            (morning|afternoon|evening|AM|PM|am|pm)?            # Optional time of day
+        )
+        \b
+        """
+    
+    ### AUCH GROBE ZEITABSCHNITTE WIE "morning / noon / afternoon / evening / all day" OHNE GENAUE ZEITANGABEN ZULASSEN??
+    ### V.A. "all day / the whole day / anytime" WICHTIG I GUESS?? -> WIRD ABER EH ASSUMED, WENN KEINE ZEIT GEFUNDEN WIRD
+
+    # Replace textual times with numbers
+    for text_time, numeric_time in textual_time_map.items():
+        user_input = re.sub(rf'\b{text_time}\b', numeric_time, user_input)
+    #print(f"TIME Changed input to: {user_input}")
+
+    ######################################################################################################
+    #### SPLITTING THE INPUT BASED ON DAYS AND TIMES
+    #print("\n---//---//---//---\n")
+    # Split the input text at day or day range boundaries
+    ## DOES NOT DETECT TIMES WITHOUT DAYS (should be interpreted as 'alldays') ### LASSE ICH ERSTMAL WEG
+    split_pattern = "|".join(found_days)
+    parts = re.split(rf"(?={split_pattern})", user_input, flags=re.IGNORECASE)
+    cleaned_parts = [part for part in parts if any(day in part for day in found_days)]
+    parts_dict = dict(zip(cleaned_parts, found_days))
+    #print(f"PARTS DICT: {parts_dict}\n")
+
+    def extract_times(input_part):
+        found_phrases = []
+        found_times = []
+        matches = re.findall(time_pattern, input_part, re.VERBOSE)
+        
+        # Iterate through each match to clean up the results
+        for match in matches:
+            # match contains multiple capturing groups, we need to check which part was matched
+            if match[0]:  # General time (e.g., "at 3 pm")
+                found_phrases.append(match[0].strip())
+            elif match[1]:  # Time range: "from X to Y"
+                found_phrases.append(match[1].strip())
+            elif match[2]:  # Time range: "between X and Y"
+                found_phrases.append(match[2].strip())
+        #print(f"Found phrases: {found_phrases}")
+
+        # If no times were found: Return whole day (0:00 - 24:00)
+        if len(found_phrases) == 0:
+            return [[0, 24]]
+
+        # For each found time, check for modifiers
+        for time in found_phrases:
+            #print(f"\n-:-:-:-:- Checking '{time}'...")
+            numbers = re.findall(r'(\d+\:\d+|\d+)', time)
+            #print(f"xx Found '{numbers}'")
+            if len(numbers) == 1:
+                number = re.search(r'\d+', numbers[0])
+                hour = int(number.group()) # Convert matched number to integer
+                #print(f"x+x+ Found '{hour}'")
+                if bool(re.search(r'(\b|\d+)(pm|afternoon|evening)\b', time.lower())) and hour <= 12:
+                    #print(f"Increasing {hour}")
+                    hour += 12
+                found_times.append([hour, hour+2])
+                #print(f"->-> Appended {found_times[-1]}")
+                    
+            elif len(numbers) == 2:
+                start_number = re.search(r'\d+', numbers[0])
+                end_number = re.search(r'\d+', numbers[1])
+                start_hour = int(start_number.group()) # Convert matched start number to integer
+                end_hour = int(end_number.group()) # Convert matched end number to integer
+                has_am = bool(re.search(r'(\b|\d+)(am|morning)\b', time.lower()))
+                has_pm = bool(re.search(r'(\b|\d+)(pm|afternoon|evening)\b', time.lower()))
+                #print(f"Found '{(start_hour, end_hour)}'\nAM: {has_am} -- PM: {has_pm}")
+
+                # If both am and pm are found or end is smaller than start, end is pm
+                if ((has_am and has_pm) or (end_hour < start_hour)) and end_hour <= 12:
+                    #print(f"Increasing end '{end_hour}'")
+                    end_hour += 12
+
+                # If only pm is found and end_hour is bigger than the start, it is for both
+                elif has_pm and end_hour > start_hour and end_hour <= 12:
+                    #print(f"Increasing both '{start_hour}' & '{end_hour}'")
+                    start_hour += 12
+                    end_hour += 12
+                found_times.append([start_hour, end_hour])
+                #print(f"->-> Appended '{found_times[-1]}'")
+            else:
+                print(f"\n\n-!-!-!- WHAT IS THIS SHIT?!?! -- '{numbers}'\n\n")
+        #print(f"x+x+x extract_times() returns {found_times}")
+        return found_times
+    
+
+    def add_time(days, times):
+        """
+        Parameters:
+            day (list): list of all days the times should be added to
+            times (list): list of times to add to all given days
+        """
+        #print(f"-x-x-x- Adding '{times}' to '{days}'")
+        if not isinstance(times, list):
+            times = [times]
+            #print(f"--- CHANGED TYPE OF TIMES TO: {type(times)}")
+        if not isinstance(days, list):
+            days = [days]
+            #print(f"--- CHANGED TYPE OF DAYS TO: {type(days)}")
+        for day in days:
+            for time in times:
+                if day in found_day_time:
+                    found_day_time[day].append(time)
+                else:
+                    found_day_time[day] = [time]
+
+    for part, days in parts_dict.items():
+        print(f"-=-=-=-=-=-=-=-=-=-=-=-=-\nChecking part '{part}' (day '{days}')...")
+        # Get the list of times for the current part of the input
+        times = extract_times(part)
+
+        # Check if 'alldays' is given -> set times for all days of the week
+        if days == 'alldays':
+            print(f"-> Found all days!\n{times}")
+            #for weekday in all_weekdays:
+            add_time(all_weekdays, times)
+            #print(f"->->-> SET TIMES: {found_day_time}")
+        
+        # Check if 'otherdays' is given -> set times for all days that have no time yet
+        elif days == 'otherdays':
+            #print(f"-> Found other days!")
+            other_days = [d for d in all_weekdays if not (d in found_day_time.keys())]
+            print(f"~~> Other days: {other_days}!\n{times}")
+            add_time(other_days, times)
+
+        # Check if a range of days is given
+        elif any(range_indicator in days for range_indicator in ['between', '-', 'to']):
+            #print(f"-> Found a range!")
+            found_day_range = []
+            for range_day in all_weekdays:
+                if range_day in days:
+                    #print(f"~~ Found start/end of range: {range_day}")
+                    found_day_range.append(range_day)
+                    # If other days have already been appended, this was the end of the range
+                    if len(found_day_range) > 1:
+                        break
+                # If this day is not in this part of the input, only append it if the first day of the range was already appended
+                elif len(found_day_range) > 0:
+                    #print(f"~~ Appending '{range_day}' to range")
+                    found_day_range.append(range_day)
+            print(f"~~> Full range: {found_day_range}\n{times}")
+            add_time(found_day_range, times)
+
+        # Otherwise, set times for the individual days in the current part of the input
+        else:
+            #print(f"-> Found individual days!")
+            found_individual_days = []
+            for ind_day in all_weekdays:
+                if ind_day in days:
+                    print(f"~~ Found: {ind_day}\n{times}")
+                    found_individual_days.append(ind_day)
+            add_time(found_individual_days, times)
+            #print(f"->->-> Added time: {found_day_time[found_individual_days[0]]}")
+    #print(f"\n\n==================================\nTime dict: {found_day_time}")
+
+    # Add the new times to the previously set times
+    if old_filter == []:
+        old_filter = {}
+    
+    for found_day, found_times in found_day_time.items():
+        if found_day in old_filter:
+            old_filter[found_day] += found_times
+        else:
+            old_filter[found_day] = found_times
+
+    # Merge overlapping timeframes
+    merged_times = {}
+    for found_day, found_times in old_filter.items():
+        found_times.sort(key=lambda x: x[0])
+
+        # Initialize the merged list with the first interval
+        merged = [found_times[0].copy()]
+        
+        for current in found_times[1:]:
+            previous = merged[-1]
+            
+            # Check for overlap
+            if current[0] <= previous[1]:
+                #print(f"FOUND OVERLAP: {current[0]} <= {previous[1]}")
+                # Merge the intervals
+                previous[1] = max(previous[1], current[1])
+            else:
+                # No overlap, add the interval to the result
+                merged.append(current)
+        merged_times[found_day] = merged
+
+    # Sort merged times by days
+    merged_times = {day: merged_times[day] for day in all_weekdays if day in merged_times}
+    return merged_times
+
+def find_modules(user_input, old_filter):
     """
     Find modules in given input
 
     Parameter:
         user_input (str): the user's input in which modules should be found
+        old_filter (list): list of modules currently filtered for
     Returns:
         list of all found modules
 
     """
-    print(f"\n\n***find_modules(): START FINDING MODULES")
+    #print(f"\n\n***find_modules(): START FINDING MODULES")
     # Module names are constructed from 
     # > "CS-" for Cognitive Science (dataset includes only Cognitive Science courses, therefore all modules start with "CS-")
     # > + "[B/M][WP/W/P]-" -- "B" if Bachelor, "M" if Master; "WP" if elective, "P" if compulsory, "W" if "Distinguishing Elective Courses"
@@ -570,8 +892,8 @@ def find_modules(user_input):
     all_modules.sort()
     modules = []
     found_area = None
-    found_program = list(module_dict['study_program'].values())
-    found_module = list(module_dict['module'].values())
+    found_program = []
+    found_module = []
 
     # First look for an area - if that is not given, return an empty list
     # Split the input into words and remove punctuation
@@ -605,11 +927,41 @@ def find_modules(user_input):
     else:
         for m in module_dict['module']:
             if m in user_input.lower():
-                #print(f"***find_modules(): Found module: {module_dict['module'][m]} (from input '{m}')")
-                #found_module.append(module_dict['module'][m])
-                found_module = [module_dict['module'][m]]
+                # If 'compulsory' is found, check if it is actually non compulsory (i.e., elective)
+                if m == 'compulsory' and bool(re.search(rf'\b(non compulsory|non-compulsory)\b', user_input.lower())):
+                    found_module = ['WP']
+                else:
+                    #print(f"***find_modules(): Found module: {module_dict['module'][m]} (from input '{m}')")
+                    #found_module.append(module_dict['module'][m])
+                    found_module = [module_dict['module'][m]]
                 break
     #print(f"***find_modules(): found_program: {found_program} -- found_module: {found_module}")
+
+    # If only the area was found and it is in the old filter, return only the old filter (in case the user just mentioned, e.g., AI without wanting to set the modules to each module that has '-AI')
+    prog_found = True if len(found_program) > 0 else False
+    mod_found = True if len(found_module) > 0 else False
+    for old_f in old_filter:
+        #print(f"Old Module: {old_f}")
+        if area in old_f:
+            if not prog_found and not mod_found:
+                #print(f"Module {area} is already in filter_dict!")
+                return old_filter
+            # If only the study program or module type is not found, set it to the one(s) from the old filter
+            old_program = re.findall(r'CS\-(B|M)', old_f)[0]
+            if not old_program in found_program:
+                #print(f"***find_modules(): Found old study program: {old_program}")
+                found_program += old_program
+            old_mod = re.findall(r'CS\-.([A-Z]+)\-', old_f)[0]
+            if not old_mod in found_module:
+                #print(f"***find_modules(): Found old mod: {old_mod}")
+                found_module += old_mod
+
+    # If the program or module is still empty, append each possible value
+    if len(found_program) == 0:
+        found_program = list(module_dict['study_program'].values())
+    if len(found_module) == 0:
+        found_module = list(module_dict['module'].values())
+
 
     # Combine all found parts and append and return all existing modules
     for p in found_program:
@@ -617,140 +969,325 @@ def find_modules(user_input):
             module = f"CS-{p}{m}{found_area} - "
             #print(f"***find_modules(): module in for-loop: {module}")
             modules += [mod for mod in all_modules if module in mod]
-    print(f"***find_modules(): found modules: {modules}")
+    #print(f"***find_modules(): found modules: {modules}")
     return modules
-    
-def find_attributes(user_input, relevant_attributes):
+
+def find_attributes(user_input, old_filter_dict):
     """
     Extracts all attributes from the input
 
     Parameters:
         user_input (str): the user's input that should be checked for attributes
     Returns:
-        dictionary with all found attributes and their values
+        dictionary with all found attributes (str) and their values (lists)
     """
-    #relevant_attributes = ['status', 'mode', 'ects', 'sws', 'lecturer_short', 'module', 'area', 'language', 'time']
+    relevant_attributes = ['status', 'mode', 'ects', 'sws', 'lecturer_short', 'module', 'area', 'language', 'filter_time']
 
     # Get a dictionary containing all possible values for each attribute that is relevant for the soup
     check_attr = {a: v for a, v in current_attributes.items() if a in relevant_attributes} ### VON current_attr (da nur mit current_courses verglichen) ODER BESSER BEIDEN (da es auch Werte geben kann, die es in früheren Semestern gab, aber jetzt nicht mehr)???
-    found_attr = {key: "" for key in check_attr}
+    found_attr = {key: [] for key in check_attr}
+    #print(f"Checking attributes: {check_attr}")
 
     for attr, val in check_attr.items():
-        #print(f"***input_soup(): checking attr '{attr}'")
+        old_filter = old_filter_dict[attr] if attr in old_filter_dict else []
+        print(f"***find_attributes(): checking attr '{attr}\n---- Old filter: {old_filter}'")
+        # First check for individually processed attributes
         if attr == 'module':
             #found_attr[attr] = str(find_modules(user_input))
-            found_attr[attr] = find_modules(user_input)
+            found_attr[attr] = find_modules(user_input, old_filter)
             #print(f"")
             continue
-        # Check if a value is found
-        for v in val:
-            #print(f"***input_soup(): -- checking value '{v}'")
-
-            if str(v).lower() in user_input.lower() and str(v) != '':
-                attr_key = attr
-
-                # If the value appears in multiple keys (attributes), check if one of the attributes is stated in the input
-                all_keys = [key for key, values in check_attr.items() if str(v) in values]
-                #print(f"ALL KEYS: {all_keys}")
-                #print(f"\n***input_soup(): Found VALUE '{v}' (for attr '{attr}') in input! -> exists in {len(all_keys)} keys!")
-
-                if len(all_keys) > 1:
-                    input_keys = [key for key in all_keys if key in user_input.lower()]
-                    #print(f"***input_soup(): ALL KEYS: {all_keys} -- INPUT KEYS: {input_keys}")
-                    if len(input_keys) > 1:
-                        #print(f"***input_soup(): selecting closest key...")
-                        # Select the key that is closest to the found value in the sentence
-                        split_input = user_input.lower().split()
-                        split_input = [word.translate(str.maketrans('', '', string.punctuation)) for word in split_input]
-
-                        # Get the positions of the value and the keys
-                        val_idx = split_input.index(str(v))
-                        key0_idx = split_input.index(input_keys[0])
-                        key1_idx = split_input.index(input_keys[1])
-                        
-                        # Compute the distances
-                        dist_key0 = abs(key0_idx - val_idx)
-                        dist_key1 = abs(key1_idx - val_idx)
-                        
-                        # Determine the closest word; if both have the same distance, choose the key behind the value
-                        if (dist_key0 < dist_key1) or (dist_key0 == dist_key1 and key0_idx > val_idx):
-                            attr_key = input_keys[0]
-                        #elif dist_key1 < dist_key0:
-                        elif (dist_key0 > dist_key1) or (dist_key0 == dist_key1 and key1_idx > val_idx):
-                            attr_key = input_keys[1]
-                        #print(f"***input_soup(): CHOSE KEY: {attr_key}")
-                    # If the current key is not in the input, skip this value (in case the other key is in the input, the value is added to it when that key is looped through)
-                    elif len(input_keys) == 1 and input_keys[0] != attr_key:
-                        continue
-                        
-                # If a value for the attribute was already found, just add the new one to it, separated by a comma
-                if found_attr[attr_key] != "":
-                    #print(f"***input_soup(): ATTRIBUT WURDE SCHON BELEGT MIT '{found_attr[attr_key]}'")
-                    # Only add the value if it is not yet in the string
-                    if not str(v) in found_attr[attr_key]:
-                        found_attr[attr_key] += f", {str(v)}"
-                        #print(f"***input_soup(): attribut '{attr_key}' (added): {found_attr[attr_key]}")
+        elif attr == 'filter_time':
+            found_attr[attr] = input_times(user_input, old_filter)
+            #print(f"")
+            continue
+        # int for SWS or ECTS points have to be directly followed by 'SWS' or 'ECTS' (except for ranges -> only second int has to be followed by it)
+        elif attr in ['sws', 'ects']:
+            #if 'sws' in user_input.lower() or 'ects' in user_input.lower():
+            # Only check for sws/ects if not checked before and at least one of the words is in the input
+            if bool(re.search(r'\b(sws|ects)\b', user_input.lower())) and found_attr['sws'] == [] and found_attr['ects'] == []:
+                old_sws_ects_filter = {sws_ects: old_filter_dict[sws_ects] if sws_ects in old_filter_dict else [] for sws_ects in ['ects', 'sws']}
+                found_attr['sws'], found_attr['ects'], user_input = find_sws_ects(user_input, old_sws_ects_filter)
+            continue
+        elif attr == 'mode':
+            found_modes = []
+            # Check if one or multiple modes are given in the input (assuming that each mentioned mode is matching the format defined in the courses)
+            matches = re.findall(r'\b((?:in person|hybrid|online)(\s(\+|with)\srecording)?)', user_input.lower(), re.IGNORECASE)  # No '\b' at the end of the regex pattern as there might also be a 's' after 'recording' and it is highly unlikely that 'recording' is just the start of a bigger word (in that case it is most likely that the user forgot a space anyway)
+            found_matches = [m[0].replace("with", "+") for m in matches]
+            print(f"matches: {found_matches}")
+            # Check if 'recording' was found
+            found_rec = True if 'recording' in " ".join(found_matches) else False
+            # If 'recording' is mentioned in the input but not found in matches, append it to each found mode
+            if (not found_rec) and bool(re.search(r'\b(recording)', user_input.lower(), re.IGNORECASE)): 
+                print(f"Found 'recording' in input!")
+                if found_matches:
+                    print("Appending 'recording' to matches...")
+                    found_modes = [m + ' + recording' for m in found_matches]
                 else:
-                    if not str(v) in found_attr[attr_key]:
-                        found_attr[attr_key] += str(v)
+                    print("No matches, appending all modes with 'recording'...")
+                    found_modes = ['online + recording', 'hybrid + recording', 'in person + recording']
+            else:
+                print("No need to add recording!")
+                found_modes = found_matches
+            found_modes += old_filter
+            found_attr['mode'] = list(set(found_modes))
+            print(f"FOUND MODES: {found_modes}")
+            continue
+        elif attr == 'status':
+            found_status = []
+            # Check if a status (or multiple) is given in the input (assuming that each mentioned status is matching the format defined in the courses)
+            for status in current_attributes['status']:
+                if status.lower() in user_input.lower():
+                    print(f"Found status: {status}")
+                    found_status.append(status)
+                    # For lecture or seminar, also append 'Lecture and Practice' or 'Seminar and Practice' as there is not a huge difference; if a user does not want one with practice, they can delete the filter later
+                    if status.lower() in ['lecture', 'seminar'] and not (status in old_filter):  # Don't append it if only 'Lecture' or 'Seminar' is in the previous filters, as that means that the user deleted the filter for 'Lecture and Practice' or 'Seminar and Parctice'
+                        found_status.append((status + ' and Practice'))
+            found_status += old_filter
+            found_attr['status'] = list(set(found_status))
+            continue
+
+        # Check for each other attribute if a value is found
+        found_attr[attr] += old_filter
+        for v in val:
+            # Add the value if it is found in the input and not yet in the list of found attributes or in the previous filter
+            if str(v).lower() in user_input.lower() and str(v) != '' and not (v in found_attr[attr]) and not (v in old_filter):
+                if isinstance(v, str):
+                    found_attr[attr].append(v.title())
+                else:
+                    found_attr[attr].append(v)
     return found_attr
 
-def set_filters(user_input):
-    filter_attributes = ['status', 'mode', 'ects', 'sws', 'lecturer_short', 'module', 'area', 'language', 'time']
-    found_attr = find_attributes(user_input, filter_attributes)
-    filter_dict = {attr: val for attr, val in found_attr.items() if val != ""}
+def set_filters(user_input, old_filter_dict):
+    """
+    
+    
+    """
+    #filter_attributes = ['status', 'mode', 'ects', 'sws', 'lecturer_short', 'module', 'area', 'language', 'filter_time']
+    found_attr = find_attributes(user_input, old_filter_dict)
+    filter_dict = {attr: val for attr, val in found_attr.items() if val} ### STATTDESSEN BESSER UPDATEN (vorheriges dict als Parameter übergeben & neue Werte hinzufügen)
     print(f"***set_filters(): filter_dict: {filter_dict}")
     return filter_dict
 
 
+###############################################
+##### CHECKING IF COURSES MATCH FILTERS #######
+def check_filter(filter_dict, course):
+    ## Checks a single course
+    missing_filters = 0  # Counts how many filtered attributes are missing (no values) for a course -> 
+    #matching_filters = 0  # IDEE: Counts how many filters are matching for a course -> if no courses match all, maybe select courses with most matches? 
+    for filter_key, filter in filter_dict.items():
+        print(f"Checking filter '{filter_key}': '{filter}' (type: {type(filter)})")
+        if not filter:
+            continue
+        # Check if the course has a value for the checked filter
+        if (not course[filter_key]) or (re.search(r'(not specified)', str(course[filter_key]))):
+            print(f"xXxXx Attribute '{filter_key}' is missing!!")
+            missing_filters += 1
+            continue
+        
+        # Check if every time of the course is in the filtered times
+        if filter_key == 'filter_time':
+            print("-> filter times...")
+            for c_day, c_times in course['filter_time'].items():
+
+                # Check if the day of the course is in the filtered times
+                if (not (c_day in filter)) or (len(filter[c_day]) == 0):
+                    print(f"-x-x-x-x- '{c_day}' is not in '{filter}'!!")
+                    return False, missing_filters
+                    
+                # Check for each time of the day if it matches the filter
+                #found_c_times = True ## If all times of the day were found in the filtered times ### PROP UNNÖTIG, DA RETURN FALSE
+                for c_time in c_times:
+                    # Times in filters are ordered -> checking smallest time first
+                    found_time = False
+                    for f_time in filter[c_day]:
+                        # If the start time of the course is smaller than the start time of the filter or it matches the end time of the filter, it does not fit
+                        #if (c_time[0] < f_time[0]) or (c_time[0] == f_time[1]):  ### UNNÖTIG WEGEN FOUND_TIME?!?
+                        #    return False
+                        # If the time of the course is within a timeframe of the filtered times for that day, there is no need to check for more filtered times in that day
+                        if (c_time[0] >= f_time[0]) and (c_time[1] <= f_time[1]):
+                            print(f"~~> Found matching time for day '{c_day}': {c_time}")
+                            found_time = True
+                            break
+                    # If all filtered times for the day were checked but no fitting time was found, return False
+                    if not found_time:
+                        return False, missing_filters
+                    
+        # Filter for lecturer is interpreted as wanting at least one of those in the list (if there are more than one) -> one match is enough
+        # 
+        elif filter_key in ['lecturer_short', 'module']:
+            found_filter = False
+            print(f"----- Lecturer/Module: {course[filter_key]}")
+            for c_val in course[filter_key]:
+                if (c_val in filter):
+                    print(f"~+~+~+~ Found {filter_key}: {c_val} in filter ({filter})")
+                    found_filter = True
+                    break
+            if not found_filter:
+                print(f"-x-x-x-x- None of these ({course[filter_key]}) are in filter!!")
+                return False, missing_filters
+        #elif filter_key == 'lecturer_short':
+        #    found_lecturer = False
+        #    print(f"----- Lecturer: {course[filter_key]}")
+        #    for c_val in course[filter_key]:
+        #        if (c_val in filter):
+        #            print(f"~+~+~+~ Found {filter_key}: {c_val} in filter ({filter})")
+        #            found_lecturer = True
+        #    if not found_lecturer:
+        #        print(f"-x-x-x-x- None of the lecturers ({course[filter_key]}) is in filter!!")
+        #        return False, missing_filters
+            
+        # For some courses, the language is "German/English" -> both German and English must be in the filter
+        elif filter_key == 'language':
+            split_lang = course[filter_key].split('/')
+            for lang in split_lang:
+                if not (lang in filter):
+                    print(f"-x-x-x-x- {filter_key}: {lang} is not in filter!!")
+                    return False, missing_filters
+                else:
+                    print(f"~+~+~+~ Found {filter_key}: {lang} in filter ({filter})")
+
+
+                    
+
+        
+        # All other filter attributes are stored in lists -> Just check if each value from the course matches the filter
+        else:
+            #for attr_val in filter:
+            #print(f"Checking filter '{filter_key}': '{filter}'")
+
+            if isinstance(course[filter_key], list):
+                print(f"----- '{filter_key}' from course is a list! -> {course[filter_key]}")
+                for c_val in course[filter_key]:
+                    """for f_val in filter:
+                        #print(f"F_VAL: {f_val}")
+                        str_f_val = str(f_val)
+                        if not bool(re.search(rf'\b{str(c_val)}\b', str_f_val)):
+                            print(f"-x-x-x-x- {filter_key}: {c_val} is not in filter!!")
+                        #if not (c_val in filter):
+                            # Check if it is trying to compare str to int
+                            if (str(c_val).isdigit() and not (int(c_val) in filter)) or not str(c_val).isdigit():
+                                print(f"-x-x-x-x- {filter_key}: {c_val} is not in filter!!")
+                                return False, missing_filters
+                        else:
+                            print(f"~+~+~+~ Found {filter_key}: {c_val} in filter ({filter})")"""
+                    if not (c_val in filter):
+                        print(f"-x-x-x-x- {filter_key}: {course[filter_key]} is not in filter!!")
+                        return False, missing_filters
+                    else:
+                        print(f"~+~+~+~ Found {filter_key}: {course[filter_key]} in filter ({filter})")
+
+            else:
+                print(f"----- '{filter_key}' from course is a string! -> {course[filter_key]}")
+                #if not (course[filter_key].lower() in [f.lower() for f in filter]):
+                # Check if both values are of the same type
+                if not isinstance(course[filter_key], type(filter[0])):
+                    # Check if one of the values is an int   #### EIGTL MÜSSTEN ATTRIBUTE IN KURSEN IMMER STRINGS ODER LISTEN SEIN -> MUSS EIGTL NUR FILTER CHECKEN
+                    if isinstance(course[filter_key], int) or isinstance(filter[0], int):
+                        # Try to convert other to int -> if that's not possible, the filter cannot match the course's attribute
+                        try:
+                            course[filter_key] = int(course[filter_key])
+                            filter = [int(f) for f in filter]
+                        except:
+                            print(f"Either {course[filter_key]} ({type(course[filter_key])}) or {filter} (type of elements: {type(filter[0])}) cannot be converted to int!!!")
+                            return False, missing_filters
+                        # If both are ints, compare them
+                        if not (course[filter_key] in filter):
+                            print(f"-x-x-x-x- {filter_key}: {course[filter_key]} is not in filter!!")
+                            return False, missing_filters
+                        else:
+                            print(f"~+~+~+~ Found {filter_key}: {course[filter_key]} in filter ({filter})")
+
+                        
+                #if (course[filter_key])
+                elif not (course[filter_key].lower() in [f.lower() for f in filter]):  ### MUSS NICHT PRÜFEN, OB BEIDE STR, DA ATTR IN KURSEN IMMER LIST (OBEN ABGEFANGEN) ODER STR SIND -> FALLS FILTER NICHT STR: OBEN ABGEFANGEN
+                    print(f"-x-x-x-x- {filter_key}: {course[filter_key]} is not in filter!!")
+                    return False, missing_filters
+                else:
+                    print(f"~+~+~+~ Found {filter_key}: {course[filter_key]} in filter ({filter})")
+            """else:
+                print(f"X=X=X=X DIFFERENT TYPE: '{filter_key}' from course is a {type(course[filter_key])}! -> {course[filter_key]}")
+                for f_val in filter:
+                    #print(f"F_VAL: {f_val}")
+                    str_f_val = str(f_val)
+                    if not bool(re.search(rf'\b{str(course[filter_key])}\b', str_f_val)):
+                        print(f"-x-x-x-x- {filter_key}: {course[filter_key]} is not in filter!!")
+                    #if not (course[filter_key] in filter):
+                        # Check if it is trying to compare str to int
+                        if (str(course[filter_key]).isdigit() and not (int(course[filter_key]) in filter)) or not str(course[filter_key]).isdigit():
+                            print(f"-x-x-x-x- {filter_key}: {course[filter_key]} is not in filter!!")
+                            return False, missing_filters
+                    else:
+                        print(f"~+~+~+~ Found {filter_key}: {course[filter_key]} in filter ({filter})")"""
+                
+
+
+                       
+    # If more than 50% of filtered attributes are missing, return False
+    if (missing_filters / len(filter_dict)) > 0.5:
+        print(f"xXxXx '{course['title']}' is missing {missing_filters}/{len(filter_dict)} attributes!! -> Removed")
+        return False, missing_filters
+    
+    # Otherwise, return True as each filter matched the course (otherwise, it would have returned at some point in the for-loop)
+    else:
+        return True, missing_filters
+
+
+def filter_courses(filter_dict, courses):
+    print("Start filtering...")
+    # If no filters are set, return all current courses
+    if len(filter_dict) == 0:
+        print("No Filters Found!")
+        return courses
+
+    matching_courses = []  # Keys: courses; values: percentage (0-1) of how many filter attributes are missing in the course
+
+    # Loop through every course and every filter
+    for course in courses:
+        print(f"\n-=-=-=-=-=-=- Checking {course['title']}...")
+        is_matching, missing_filters = check_filter(filter_dict, course)
+        if is_matching:
+            print(f"~o~o~ Found matching course '{course['title']}' (missing {missing_filters} filters)")
+            missing = (missing_filters / len(filter_dict))
+            matching_courses.append([course, missing])
+    #print(f"MATCHING: {matching_courses}")
+    return matching_courses
+
+
 
 ###--- Recommendation Generation ---###
-def input_soup(user_input):
-    """
-    Creates a soup from the user input that has the same scheme as the course-soups for better comparison
 
-    Parameter:
-        user_input (str): the user's input that should be transformed into a soup
-    Returns:
-        user_soup
-    """
-    print(f"\n\n***input_soup(): START CREATING SOUP")
-    # Attributes that are relevant for the soup, except from title and description
-    soup_attributes = ['status', 'mode', 'ects', 'sws', 'lecturer_short', 'module', 'area']
-    found_attr = find_attributes(user_input, soup_attributes)
-    
-    # Create soup  ##### MAYBE REMOVE FOUND ATTRIBUTES FROM INPUT AND ONLY PUT REST OF INPUT IN DESCRIPTION??? AT LEAST FOR ECTS, SWS & LECTURER
-    soup = f"Title: . Description: {user_input}. Status: {found_attr['status']}. Mode: {found_attr['mode']}. ECTS: {found_attr['ects']}. SWS: {found_attr['sws']}. Lecturer: {found_attr['lecturer_short']}. Module: {found_attr['module']}. Area: {found_attr['area']}."
-    print(f"\n***input_soup(): FINAL found_attr: {found_attr}\n***input_soup(): Soup: '{soup}'")
-    return soup
-
-
-def input_embedding(user_input):
+def input_embedding(user_input, filter_dict):
     """
     Encodes a given string
 
         Parameters:
             user_input (str): the user's input
+            filter_dict (dict): currently set filters
         Returns:
             input_emb: the embedding of the input
+            updated filter_dict
     """
-    relevant_attributes = ['status', 'mode', 'ects', 'sws', 'lecturer_short', 'module', 'area', 'language', 'time']
-    found_attr = find_attributes(user_input, relevant_attributes)
+    #relevant_attributes = ['status', 'mode', 'ects', 'sws', 'lecturer_short', 'module', 'area', 'language', 'time']
+    updated_filter_dict = find_attributes(user_input, filter_dict)
+    print(f"\n***~~~input_embedding(): Updated FILTER: {updated_filter_dict}")
 
     # Get the attributes to set filters for
-    filter_dict = {attr: val for attr, val in found_attr.items() if val != ""}
-    print(f"***set_filters(): filter_dict: {filter_dict}")
+    #filter_dict = {attr: val for attr, val in found_attr.items() if val != ""}
+    #print(f"***set_filters(): filter_dict: {filter_dict}")
 
     # Get input in soup-format
-    soup = f"Title: . Description: {user_input}. Status: {found_attr['status']}. Mode: {found_attr['mode']}. ECTS: {found_attr['ects']}. SWS: {found_attr['sws']}. Lecturer: {found_attr['lecturer_short']}. Module: {found_attr['module']}. Area: {found_attr['area']}."
-    print(f"\n***input_soup(): FINAL found_attr: {found_attr}\n***input_soup(): Soup: '{soup}'")
+    soup_dict = {attr: updated_filter_dict[attr].copy() if attr in updated_filter_dict else "" for attr in ['status', 'mode', 'ects', 'sws', 'lecturer_short', 'module', 'area']}
+    soup = f"Title: . Description: {user_input}. Status: {soup_dict['status']}. Mode: {soup_dict['mode']}. ECTS: {soup_dict['ects']}. SWS: {soup_dict['sws']}. Lecturer: {soup_dict['lecturer_short']}. Module: {soup_dict['module']}. Area: {soup_dict['area']}."
+    #print(f"\n***input_embedding(): FINAL soup_dict: {soup_dict}\n***input_embedding(): Soup: '{soup}'")
 
     #soup = input_soup(user_input)
     input_emb = model.encode([soup])[0]
-    return input_emb, filter_dict
+    return input_emb, updated_filter_dict
 
 
-def recommend_courses(user_profile, rated_courses, previously_liked_courses, amount=5, filter_dict={}):
+def recommend_courses(user_profile, rated_courses, previously_liked_courses, filter_dict, amount=5):
     """
     Generates recommendations based on a user's preferences.
 
@@ -770,18 +1307,21 @@ def recommend_courses(user_profile, rated_courses, previously_liked_courses, amo
 
     # Rank courses by similarity
     top_courses_indices = similarities.argsort()[::-1]
+    print(f"***recommend_courses(): ~-~-~ Courses with top indices: {[current_courses[idx]['title'] for idx in top_courses_indices[:6]]}")
 
     #### MAYBE DELETE ALL COURSES WITH SIMILARITY BELOW THRESHOLD ALREADY HERE
     #### THEN CHECK IF LIST OF POSSIBLE RECOMMENDATIONS IS EMPTY: IF YES, SKIP REST AND WRITE RESPONSE
   
     # Delete already rated courses from top recommendations and select the specified amount of recommendations
     top_indices = [int(idx) for idx in top_courses_indices if idx not in rated_courses]
+    print(f"\n***recommend_courses(): ~-~-~ Courses without ranted ones: {[current_courses[idx]['title']  for idx in top_indices[:6]]}")
 
     # Get the titles of previously liked courses
     liked_titles = [past_courses[idx]['title'] for idx in previously_liked_courses]
 
     # Delete all titles that are already in the previously liked courses
     cleaned_indices = [idx for idx in top_indices if current_courses[idx]['title'] not in liked_titles]
+    print(f"\n***recommend_courses(): ~-~-~ Courses without prev. liked: {[current_courses[idx]['title']  for idx in cleaned_indices[:6]]}")
 
     response = ""
     response_end = ""
@@ -800,17 +1340,36 @@ def recommend_courses(user_profile, rated_courses, previously_liked_courses, amo
         response_end = f"You already rated all the other courses or have taken them in previous semesters! I hope I was able to help you finding new courses and that I will see you again in a few months. Have a great semester!"
         to_recommend = cleaned_indices
 
-    else:
-        # Delete all courses that do not match the selected filters
-        #if len(filter_dict) > 0:
+    else:          
+        # Delete courses that do not match the current filters
+        cleaned_courses = [current_courses[idx] for idx in cleaned_indices]
+        filtered_courses = filter_courses(filter_dict, cleaned_courses)
+        filtered_indices = [current_courses.index(c) for c in filtered_courses]
+        print(f"\n***recommend_courses(): ~-~-~ Courses filtered: {[c['title'] for c in filtered_courses]}")
+        threshold = 0.7
+
+        # If there are no courses left that match the current filters, ask the user to remove some filters
+        if len(filtered_courses) == 0:
+            response = f"There are no courses that match the currently set filters that you haven't rated or mentioned before! Please remove some filters by clicking on them in the list on the left side of the screen."
+            response_end = ""
+            to_recommend = []
+            return response, response_end, to_recommend
             
+        # If there are less then the specified amount of courses left to recommend, tell the user that these are the last courses they have not yet rated or mentioned to have previously liked
+        elif len(filtered_courses) <= amount:
+            response = f"There are only {len(filtered_courses)} courses that match the currently set filters that you haven't rated or mentioned before! These are:  \n"
+            response_end = f"Please remove some filters by clicking on them in the list on the left side of the screen."
+            to_recommend = filtered_indices
+            return response, response_end, to_recommend
 
-
+        # Decrease threshold if filters are set
+        elif len(filtered_courses) < len(cleaned_indices):
+            threshold = 0.5
 
         # Check if the similarity of any of the courses is above the threshold and select the corresponding response to return together with the list of courses to recommend
-        print(f"***recommend_courses(): Best fits: {[(get_current_title(c), float(similarities[c])) for c in cleaned_indices[:amount]]}")
-        for course in cleaned_indices[:amount]:
-            if float(similarities[course]) >= 0.7:
+        print(f"***recommend_courses(): Best fits: {[(get_current_title(c), float(similarities[c])) for c in filtered_indices[:amount]]}")
+        for course in filtered_indices[:amount]:
+            if float(similarities[course]) >= threshold:
                 to_recommend.append(course)
         if len(to_recommend) > 1:
             response = "I found some courses you might like:  \n"
@@ -821,4 +1380,5 @@ def recommend_courses(user_profile, rated_courses, previously_liked_courses, amo
         else:
             response = "I need some more information to generate good recommendations for you. Could you tell me more about what kind of course you are looking for? Or is there any course you liked in the past that you didn't tell me about yet? "
         print(f"***recommend_courses(): Recommending: {[(get_current_title(c), float(similarities[c])) for c in to_recommend]}")
+
     return response, response_end, to_recommend

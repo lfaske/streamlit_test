@@ -38,7 +38,7 @@ abbreviations = {
 # Define chatbot replies based on user's intent
 intent_replies = {
     "greeting": "Hello! How can I assist you with course recommendations today?",
-    "free_description": "Thanks for sharing! ",
+    "free_description": "Thanks for sharing!  \n",
     "liked_course_reference": "That's a great course! Let me find some similar courses for you...",
     "feedback": "Thank you for your feedback! I'll use it to improve recommendations.",
     "nonsense": "I'm sorry, but your message does not make sense to me. I can only understand messages in the context of recommending university courses. For more instructions click on the 'Instructions' button below the chat. Could you please rephrase your message to be more clear?",

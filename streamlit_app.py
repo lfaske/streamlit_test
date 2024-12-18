@@ -25,7 +25,7 @@ if "user_profile" not in st.session_state:
         'previously_liked_courses': [],
         'rated_courses': [],
         'last_recommendations': [],
-        'set_attributes': {}
+        'filter_dict': {}
     }
 
 # Initialize the instruction/hint buttons
@@ -121,7 +121,7 @@ if user_input := st.chat_input("Start typing ..."):
             'previously_liked_courses': [],
             'rated_courses': [],
             'last_recommendations': [],
-            'set_attributes': {}
+            'filter_dict': {}
             }
         st.session_state.hint_button = {
             'show_instructions': False,
@@ -168,7 +168,7 @@ if user_input := st.chat_input("Start typing ..."):
 
                 # Update the user profile and generate recommendations
                 st.session_state.user_profile['preferences'] = update_user_profile(user_profile=st.session_state.user_profile['preferences'], rated_course=(liked_course, 'past'), liked=True)
-                reply, reply_end, st.session_state.user_profile['last_recommendations'] = recommend_courses(user_profile=st.session_state.user_profile['preferences'], rated_courses=st.session_state.user_profile['rated_courses'], previously_liked_courses=st.session_state.user_profile['previously_liked_courses'])
+                reply, reply_end, st.session_state.user_profile['last_recommendations'] = recommend_courses(user_profile=st.session_state.user_profile['preferences'], rated_courses=st.session_state.user_profile['rated_courses'], previously_liked_courses=st.session_state.user_profile['previously_liked_courses'], filter_dict=st.session_state.user_profile['filter_dict'])
                 chatbot_reply += reply
                 chatbot_reply_end += reply_end
                 new_recommendations = st.session_state.user_profile['last_recommendations']
@@ -203,18 +203,18 @@ if user_input := st.chat_input("Start typing ..."):
                 else:
                     chatbot_reply = f"You liked the course {get_past_title(detected_courses[0])}.  \n"
                     st.session_state.user_profile['preferences'] = update_user_profile(user_profile=st.session_state.user_profile['preferences'], rated_course=(detected_courses[0], 'past'), liked=True)
-                    reply, reply_end, st.session_state.user_profile['last_recommendations'] = recommend_courses(user_profile=st.session_state.user_profile['preferences'], rated_courses=st.session_state.user_profile['rated_courses'], previously_liked_courses=st.session_state.user_profile['previously_liked_courses'])
+                    reply, reply_end, st.session_state.user_profile['last_recommendations'] = recommend_courses(user_profile=st.session_state.user_profile['preferences'], rated_courses=st.session_state.user_profile['rated_courses'], previously_liked_courses=st.session_state.user_profile['previously_liked_courses'], filter_dict=st.session_state.user_profile['filter_dict'])
                     chatbot_reply += reply
                     chatbot_reply_end += reply_end
                     new_recommendations = st.session_state.user_profile['last_recommendations']
 
             # If the user gave a description, update their profile and generate new recommendations 
             elif detected_intent == "free_description":
-                input_emb, filter_dict = input_embedding(user_input)  # Compute the embedding of the user's input and get the mentioned attributes for the filter
+                input_emb, st.session_state.user_profile['filter_dict'] = input_embedding(user_input, st.session_state.user_profile['filter_dict'])  # Compute the embedding of the user's input and get the mentioned attributes for the filter
 
                 # Update the user profile and generate recommendations
                 st.session_state.user_profile['preferences'] = update_user_profile(user_profile=st.session_state.user_profile['preferences'], input_embedding=input_emb, liked=True)
-                reply, reply_end, st.session_state.user_profile['last_recommendations'] = recommend_courses(user_profile=st.session_state.user_profile['preferences'], rated_courses=st.session_state.user_profile['rated_courses'], previously_liked_courses=st.session_state.user_profile['previously_liked_courses'])
+                reply, reply_end, st.session_state.user_profile['last_recommendations'] = recommend_courses(user_profile=st.session_state.user_profile['preferences'], rated_courses=st.session_state.user_profile['rated_courses'], previously_liked_courses=st.session_state.user_profile['previously_liked_courses'], filter_dict=st.session_state.user_profile['filter_dict'])
                 chatbot_reply += reply
                 chatbot_reply_end += reply_end
                 new_recommendations = st.session_state.user_profile['last_recommendations']
@@ -230,7 +230,7 @@ if user_input := st.chat_input("Start typing ..."):
                         #print(f"xxx intent feedback: Updated profile with: {get_current_title(c)} -> {sentiment}")
                     
                     # Generate new recommendations
-                    reply, reply_end, st.session_state.user_profile['last_recommendations'] = recommend_courses(user_profile=st.session_state.user_profile['preferences'], rated_courses=st.session_state.user_profile['rated_courses'], previously_liked_courses=st.session_state.user_profile['previously_liked_courses'])
+                    reply, reply_end, st.session_state.user_profile['last_recommendations'] = recommend_courses(user_profile=st.session_state.user_profile['preferences'], rated_courses=st.session_state.user_profile['rated_courses'], previously_liked_courses=st.session_state.user_profile['previously_liked_courses'], filter_dict=st.session_state.user_profile['filter_dict'])
                     chatbot_reply += reply
                     chatbot_reply_end += reply_end
                     new_recommendations = st.session_state.user_profile['last_recommendations']

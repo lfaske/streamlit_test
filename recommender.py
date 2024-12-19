@@ -130,6 +130,14 @@ def get_details(idx):
     """
     return current_courses[idx]
 
+def get_all_filter():
+    filter_attributes = ['status', 'mode', 'ects', 'sws', 'lecturer_short', 'module', 'language', 'filter_time']
+    # Sort all filter values
+    all_filter = {key: current_attributes[key] for key in filter_attributes}
+    #all_filter = {key: sorted([val for val in current_attributes[key] if not (val in [None, 'not specified'])]) if key != 'filter_time' else {val: current_attributes[key][val] for val in current_attributes[key]} for key in filter_attributes}
+    #print(f"~+~+~ ALL FILTER: {all_filter}")
+    return all_filter
+
 ###--- Handle Intent Detection ---###
 
 def detect_intent(user_input, last_recommendations):
@@ -232,8 +240,8 @@ def check_intent(detected_intent, user_input, user_embedding, last_recommendatio
             #print(f"{title}: {title_sim}")
 
             ## JUST TESTING 
-            if title_sim > 0.3:
-                print(f"***detect_intent(): Title similarity of '{title}': {title_sim}")
+            #if title_sim > 0.3:
+            #    print(f"***detect_intent(): Title similarity of '{title}': {title_sim}")
                 
             # If the similarity score of the title is above the threshold and higher than the currently highest one, save the courses index and the score as best fit
             if title_sim > title_threshold and title_sim > best_fit[1]:
@@ -594,8 +602,11 @@ def find_sws_ects(user_input, old_filter):
         numbers = [int(nr) for nr in re.findall(r'\d+', match)]
         # Check for ranges
         if any(range_indicator in match for range_indicator in ['and', '-', 'to']):
-            numbers = list(range(numbers[0], numbers[1]+1))
+            #numbers = list(range(numbers[0], numbers[1]+1))
+            numbers = [str(min(numbers)), str(max(numbers))]
             #print(f"~~> Found range: {numbers}")
+        else:
+            numbers = [str(numbers), str(numbers)]
         if attr == 'sws':
             found_sws += numbers
         elif attr == 'ects':
@@ -606,12 +617,13 @@ def find_sws_ects(user_input, old_filter):
 
     # Combine them with previously set filters
     #found_sws += old_filter
-    found_sws += old_filter['sws']
-    found_ects += old_filter['ects']
+    # Filter gives a range of sws and ects as a tuple set new sws/ects as the range
+    #found_sws += old_filter['sws']
+    #found_ects += old_filter['ects']
 
     # Remove duplicates and sort the lists
-    found_sws = sorted(list(set(found_sws)))
-    found_ects = sorted(list(set(found_ects)))
+    #found_sws = sorted(list(set(found_sws)))
+    #found_ects = sorted(list(set(found_ects)))
     print(f"Found SWS: {found_sws}\nFound ECTS: {found_ects}\nCleaned input: {cleaned_input}")
     return found_sws, found_ects, cleaned_input
 
@@ -647,6 +659,11 @@ def input_times(user_input, old_filter):
     matches = re.findall(abbrev_weekdays_pattern, user_input, re.VERBOSE | re.IGNORECASE)
     found_days = [m[0] for m in matches]
     print(f"-> Days mentioned in input: {found_days}")
+
+    # If there are no days mentioned in the input, return the dictionary from the old filter
+    if not found_days:
+        print("x>x>x> input_times(): No days were found! Returning old...")
+        return old_filter
 
         
     ################################################################
@@ -789,7 +806,7 @@ def input_times(user_input, old_filter):
                     found_day_time[day] = [time]
 
     for part, days in parts_dict.items():
-        print(f"-=-=-=-=-=-=-=-=-=-=-=-=-\nChecking part '{part}' (day '{days}')...")
+        print(f"\n***input_times(): Checking part '{part}' (day '{days}')...")
         # Get the list of times for the current part of the input
         times = extract_times(part)
 
@@ -849,10 +866,15 @@ def input_times(user_input, old_filter):
 
     # Merge overlapping timeframes
     merged_times = {}
+    print(f"***input_times(): Merging old ({old_filter}) with new ({found_day_time}) times...")
     for found_day, found_times in old_filter.items():
+        if not found_times:
+            merged_times[found_day] = []
+            continue
         found_times.sort(key=lambda x: x[0])
 
         # Initialize the merged list with the first interval
+        print(f"***input_time(): Initializing merge with first item of {found_times}")
         merged = [found_times[0].copy()]
         
         for current in found_times[1:]:
@@ -981,6 +1003,8 @@ def find_attributes(user_input, old_filter_dict):
     Returns:
         dictionary with all found attributes (str) and their values (lists)
     """
+    print(f"\n-=-=-=-=-=-=-=-=-=-=-=-=-\nLooking for attributes in input...")
+
     relevant_attributes = ['status', 'mode', 'ects', 'sws', 'lecturer_short', 'module', 'area', 'language', 'filter_time']
 
     # Get a dictionary containing all possible values for each attribute that is relevant for the soup
@@ -990,7 +1014,7 @@ def find_attributes(user_input, old_filter_dict):
 
     for attr, val in check_attr.items():
         old_filter = old_filter_dict[attr] if attr in old_filter_dict else []
-        print(f"***find_attributes(): checking attr '{attr}\n---- Old filter: {old_filter}'")
+        print(f"***find_attributes(): checking attr '{attr} --- Old filter: {old_filter}'")
         # First check for individually processed attributes
         if attr == 'module':
             #found_attr[attr] = str(find_modules(user_input))
@@ -1042,7 +1066,9 @@ def find_attributes(user_input, old_filter_dict):
                     found_status.append(status)
                     # For lecture or seminar, also append 'Lecture and Practice' or 'Seminar and Practice' as there is not a huge difference; if a user does not want one with practice, they can delete the filter later
                     if status.lower() in ['lecture', 'seminar'] and not (status in old_filter):  # Don't append it if only 'Lecture' or 'Seminar' is in the previous filters, as that means that the user deleted the filter for 'Lecture and Practice' or 'Seminar and Parctice'
-                        found_status.append((status + ' and Practice'))
+                        extended_status = status + ' and Practice'
+                        if extended_status in current_attributes['status']:
+                            found_status.append(extended_status)
             found_status += old_filter
             found_attr['status'] = list(set(found_status))
             continue
@@ -1077,109 +1103,76 @@ def check_filter(filter_dict, course):
     missing_filters = 0  # Counts how many filtered attributes are missing (no values) for a course -> 
     #matching_filters = 0  # IDEE: Counts how many filters are matching for a course -> if no courses match all, maybe select courses with most matches? 
     for filter_key, filter in filter_dict.items():
-        print(f"Checking filter '{filter_key}': '{filter}' (type: {type(filter)})")
+        #print(f"Checking filter '{filter_key}': '{filter}' (type: {type(filter)})")
         if not filter:
             continue
         # Check if the course has a value for the checked filter
         if (not course[filter_key]) or (re.search(r'(not specified)', str(course[filter_key]))):
-            print(f"xXxXx Attribute '{filter_key}' is missing!!")
+            #print(f"xXxXx Attribute '{filter_key}' is missing!!")
             missing_filters += 1
             continue
         
         # Check if every time of the course is in the filtered times
         if filter_key == 'filter_time':
-            print("-> filter times...")
+            #print("-> filter times...")
             for c_day, c_times in course['filter_time'].items():
 
                 # Check if the day of the course is in the filtered times
                 if (not (c_day in filter)) or (len(filter[c_day]) == 0):
-                    print(f"-x-x-x-x- '{c_day}' is not in '{filter}'!!")
+                    #print(f"-x-x-x-x- '{c_day}' is not in '{filter}'!!")
                     return False, missing_filters
                     
                 # Check for each time of the day if it matches the filter
-                #found_c_times = True ## If all times of the day were found in the filtered times ### PROP UNNÖTIG, DA RETURN FALSE
                 for c_time in c_times:
                     # Times in filters are ordered -> checking smallest time first
                     found_time = False
                     for f_time in filter[c_day]:
-                        # If the start time of the course is smaller than the start time of the filter or it matches the end time of the filter, it does not fit
-                        #if (c_time[0] < f_time[0]) or (c_time[0] == f_time[1]):  ### UNNÖTIG WEGEN FOUND_TIME?!?
-                        #    return False
                         # If the time of the course is within a timeframe of the filtered times for that day, there is no need to check for more filtered times in that day
                         if (c_time[0] >= f_time[0]) and (c_time[1] <= f_time[1]):
-                            print(f"~~> Found matching time for day '{c_day}': {c_time}")
+                            #print(f"~~> Found matching time for day '{c_day}': {c_time}")
                             found_time = True
                             break
                     # If all filtered times for the day were checked but no fitting time was found, return False
                     if not found_time:
                         return False, missing_filters
                     
-        # Filter for lecturer is interpreted as wanting at least one of those in the list (if there are more than one) -> one match is enough
-        # 
+        # Filters for lecturer and module are interpreted as wanting at least one of those in the list (if there are more than one) -> one match is enough
         elif filter_key in ['lecturer_short', 'module']:
             found_filter = False
-            print(f"----- Lecturer/Module: {course[filter_key]}")
+            #print(f"----- Lecturer/Module: {course[filter_key]}")
             for c_val in course[filter_key]:
                 if (c_val in filter):
-                    print(f"~+~+~+~ Found {filter_key}: {c_val} in filter ({filter})")
+                    #print(f"~+~+~+~ Found {filter_key}: {c_val} in filter ({filter})")
                     found_filter = True
                     break
             if not found_filter:
-                print(f"-x-x-x-x- None of these ({course[filter_key]}) are in filter!!")
+                #print(f"-x-x-x-x- None of these ({course[filter_key]}) are in filter!!")
                 return False, missing_filters
-        #elif filter_key == 'lecturer_short':
-        #    found_lecturer = False
-        #    print(f"----- Lecturer: {course[filter_key]}")
-        #    for c_val in course[filter_key]:
-        #        if (c_val in filter):
-        #            print(f"~+~+~+~ Found {filter_key}: {c_val} in filter ({filter})")
-        #            found_lecturer = True
-        #    if not found_lecturer:
-        #        print(f"-x-x-x-x- None of the lecturers ({course[filter_key]}) is in filter!!")
-        #        return False, missing_filters
             
         # For some courses, the language is "German/English" -> both German and English must be in the filter
         elif filter_key == 'language':
             split_lang = course[filter_key].split('/')
             for lang in split_lang:
                 if not (lang in filter):
-                    print(f"-x-x-x-x- {filter_key}: {lang} is not in filter!!")
+                    #print(f"-x-x-x-x- {filter_key}: {lang} is not in filter!!")
                     return False, missing_filters
-                else:
-                    print(f"~+~+~+~ Found {filter_key}: {lang} in filter ({filter})")
+                #else:
+                #    print(f"~+~+~+~ Found {filter_key}: {lang} in filter ({filter})")
 
-
-                    
-
-        
         # All other filter attributes are stored in lists -> Just check if each value from the course matches the filter
         else:
-            #for attr_val in filter:
             #print(f"Checking filter '{filter_key}': '{filter}'")
-
             if isinstance(course[filter_key], list):
-                print(f"----- '{filter_key}' from course is a list! -> {course[filter_key]}")
+                #print(f"----- '{filter_key}' from course is a list! -> {course[filter_key]}")
                 for c_val in course[filter_key]:
-                    """for f_val in filter:
-                        #print(f"F_VAL: {f_val}")
-                        str_f_val = str(f_val)
-                        if not bool(re.search(rf'\b{str(c_val)}\b', str_f_val)):
-                            print(f"-x-x-x-x- {filter_key}: {c_val} is not in filter!!")
-                        #if not (c_val in filter):
-                            # Check if it is trying to compare str to int
-                            if (str(c_val).isdigit() and not (int(c_val) in filter)) or not str(c_val).isdigit():
-                                print(f"-x-x-x-x- {filter_key}: {c_val} is not in filter!!")
-                                return False, missing_filters
-                        else:
-                            print(f"~+~+~+~ Found {filter_key}: {c_val} in filter ({filter})")"""
                     if not (c_val in filter):
-                        print(f"-x-x-x-x- {filter_key}: {course[filter_key]} is not in filter!!")
+                        #print(f"-x-x-x-x- {filter_key}: {course[filter_key]} is not in filter!!")
                         return False, missing_filters
-                    else:
-                        print(f"~+~+~+~ Found {filter_key}: {course[filter_key]} in filter ({filter})")
+                    #else:
+                    #    print(f"~+~+~+~ Found {filter_key}: {course[filter_key]} in filter ({filter})")
 
             else:
-                print(f"----- '{filter_key}' from course is a string! -> {course[filter_key]}")
+                #print(f"----- '{filter_key}' from course is a string! -> {course[filter_key]}")
                 #if not (course[filter_key].lower() in [f.lower() for f in filter]):
                 # Check if both values are of the same type
                 if not isinstance(course[filter_key], type(filter[0])):
@@ -1190,43 +1183,25 @@ def check_filter(filter_dict, course):
                             course[filter_key] = int(course[filter_key])
                             filter = [int(f) for f in filter]
                         except:
-                            print(f"Either {course[filter_key]} ({type(course[filter_key])}) or {filter} (type of elements: {type(filter[0])}) cannot be converted to int!!!")
+                            #print(f"Either {course[filter_key]} ({type(course[filter_key])}) or {filter} (type of elements: {type(filter[0])}) cannot be converted to int!!!")
                             return False, missing_filters
                         # If both are ints, compare them
                         if not (course[filter_key] in filter):
-                            print(f"-x-x-x-x- {filter_key}: {course[filter_key]} is not in filter!!")
+                            #print(f"-x-x-x-x- {filter_key}: {course[filter_key]} is not in filter!!")
                             return False, missing_filters
-                        else:
-                            print(f"~+~+~+~ Found {filter_key}: {course[filter_key]} in filter ({filter})")
+                        #else:
+                            #print(f"~+~+~+~ Found {filter_key}: {course[filter_key]} in filter ({filter})")
 
-                        
                 #if (course[filter_key])
                 elif not (course[filter_key].lower() in [f.lower() for f in filter]):  ### MUSS NICHT PRÜFEN, OB BEIDE STR, DA ATTR IN KURSEN IMMER LIST (OBEN ABGEFANGEN) ODER STR SIND -> FALLS FILTER NICHT STR: OBEN ABGEFANGEN
-                    print(f"-x-x-x-x- {filter_key}: {course[filter_key]} is not in filter!!")
+                    #print(f"-x-x-x-x- {filter_key}: {course[filter_key]} is not in filter!!")
                     return False, missing_filters
-                else:
-                    print(f"~+~+~+~ Found {filter_key}: {course[filter_key]} in filter ({filter})")
-            """else:
-                print(f"X=X=X=X DIFFERENT TYPE: '{filter_key}' from course is a {type(course[filter_key])}! -> {course[filter_key]}")
-                for f_val in filter:
-                    #print(f"F_VAL: {f_val}")
-                    str_f_val = str(f_val)
-                    if not bool(re.search(rf'\b{str(course[filter_key])}\b', str_f_val)):
-                        print(f"-x-x-x-x- {filter_key}: {course[filter_key]} is not in filter!!")
-                    #if not (course[filter_key] in filter):
-                        # Check if it is trying to compare str to int
-                        if (str(course[filter_key]).isdigit() and not (int(course[filter_key]) in filter)) or not str(course[filter_key]).isdigit():
-                            print(f"-x-x-x-x- {filter_key}: {course[filter_key]} is not in filter!!")
-                            return False, missing_filters
-                    else:
-                        print(f"~+~+~+~ Found {filter_key}: {course[filter_key]} in filter ({filter})")"""
-                
+                #else:
+                    #print(f"~+~+~+~ Found {filter_key}: {course[filter_key]} in filter ({filter})")            
 
-
-                       
     # If more than 50% of filtered attributes are missing, return False
     if (missing_filters / len(filter_dict)) > 0.5:
-        print(f"xXxXx '{course['title']}' is missing {missing_filters}/{len(filter_dict)} attributes!! -> Removed")
+        #print(f"xXxXx '{course['title']}' is missing {missing_filters}/{len(filter_dict)} attributes!! -> Removed")
         return False, missing_filters
     
     # Otherwise, return True as each filter matched the course (otherwise, it would have returned at some point in the for-loop)
@@ -1245,7 +1220,7 @@ def filter_courses(filter_dict, courses):
 
     # Loop through every course and every filter
     for course in courses:
-        print(f"\n-=-=-=-=-=-=- Checking {course['title']}...")
+        #print(f"\n-=-=-=-=-=-=- Checking {course['title']}...")
         is_matching, missing_filters = check_filter(filter_dict, course)
         if is_matching:
             print(f"~o~o~ Found matching course '{course['title']}' (missing {missing_filters} filters)")
@@ -1344,26 +1319,27 @@ def recommend_courses(user_profile, rated_courses, previously_liked_courses, fil
         # Delete courses that do not match the current filters
         cleaned_courses = [current_courses[idx] for idx in cleaned_indices]
         filtered_courses = filter_courses(filter_dict, cleaned_courses)
-        filtered_indices = [current_courses.index(c) for c in filtered_courses]
-        print(f"\n***recommend_courses(): ~-~-~ Courses filtered: {[c['title'] for c in filtered_courses]}")
+        #print(f"CLEANED COURSES: {cleaned_courses}")
+        filtered_indices = [current_courses.index(c[0]) for c in filtered_courses]
+        print(f"\n***recommend_courses(): ~-~-~ Courses filtered: {[c[0]['title'] for c in filtered_courses]}")
         threshold = 0.7
 
         # If there are no courses left that match the current filters, ask the user to remove some filters
-        if len(filtered_courses) == 0:
+        if len(filtered_indices) == 0:
             response = f"There are no courses that match the currently set filters that you haven't rated or mentioned before! Please remove some filters by clicking on them in the list on the left side of the screen."
             response_end = ""
             to_recommend = []
             return response, response_end, to_recommend
             
         # If there are less then the specified amount of courses left to recommend, tell the user that these are the last courses they have not yet rated or mentioned to have previously liked
-        elif len(filtered_courses) <= amount:
-            response = f"There are only {len(filtered_courses)} courses that match the currently set filters that you haven't rated or mentioned before! These are:  \n"
+        elif len(filtered_indices) <= amount:
+            response = f"There are only {len(filtered_indices)} courses that match the currently set filters that you haven't rated or mentioned before! These are:  \n"
             response_end = f"Please remove some filters by clicking on them in the list on the left side of the screen."
             to_recommend = filtered_indices
             return response, response_end, to_recommend
 
         # Decrease threshold if filters are set
-        elif len(filtered_courses) < len(cleaned_indices):
+        elif len(filtered_indices) < len(cleaned_indices):
             threshold = 0.5
 
         # Check if the similarity of any of the courses is above the threshold and select the corresponding response to return together with the list of courses to recommend

@@ -77,6 +77,12 @@ hints = {
             </div>"""
 }
 
+# Text to add to certain widgets to help the user 
+help_text = {
+    'module': "The naming of the modules consists of the following information:  \n- 'CS-': Cognitive Science (currently only courses from Cognitive Science modules are included)  \n- 'B'|'M': 'B' for modules from the Bachelor's program, 'M' for the Master's program  \n- 'P'|'W'|'WP': The type of the module - 'P' for compulsory modules, 'WP' for elective modules, 'W' for Distinguishing Elective Courses and Instruction for Working Scientifically  \n- '-XY': The short form of the area (e.g., 'AI' for Artificial Intelligence)  \n\nExample: The module 'CS-BWP-NI' is the elective Neuroinformatics module for the Bachelor's program"
+
+}
+
 # To find mentioned modules
 module_dict = {
     'study_program': {
